@@ -4,7 +4,26 @@ import lodash from 'lodash';
 import striptags from 'striptags';
 const { find } = lodash;
 
-export const getSubtitles = async ({ videoID, lang = 'en' }) => {
+interface Subtitle {
+  start: string;
+  dur: string;
+  text: string;
+}
+
+interface CaptionTrack {
+  baseUrl: string;
+  vssId: string;
+}
+
+interface Options {
+  videoID: string;
+  lang?: string;
+}
+
+export const getSubtitles = async ({
+  videoID,
+  lang = 'en',
+}: Options): Promise<Subtitle[]> => {
   // Fetch YouTube video page data
   const { data } = await axios.get(`https://youtube.com/watch?v=${videoID}`);
 
@@ -16,7 +35,14 @@ export const getSubtitles = async ({ videoID, lang = 'en' }) => {
 
   // Extract caption tracks JSON string from video page data
   const regex = /"captionTracks":(\[.*?\])/;
-  const [_, captionTracksJson] = regex.exec(data);
+  const regexResult = regex.exec(data);
+
+  if (!regexResult) {
+    console.warn(`Failed to extract captionTracks from video: ${videoID}`);
+    return [];
+  }
+
+  const [_, captionTracksJson] = regexResult;
   const captionTracks = JSON.parse(captionTracksJson);
 
   // Find the appropriate subtitle language track
@@ -43,11 +69,20 @@ export const getSubtitles = async ({ videoID, lang = 'en' }) => {
     .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
     .replace('</transcript>', '')
     .split('</text>')
-    .filter((line) => line && line.trim())
-    .map((line) => {
+    .filter((line: string) => line && line.trim())
+    .map((line: string) => {
       // Extract start and duration times using regex patterns
-      const [, start] = startRegex.exec(line);
-      const [, dur] = durRegex.exec(line);
+
+      const startResult = startRegex.exec(line);
+      const durResult = durRegex.exec(line);
+
+      if (!startResult || !durResult) {
+        console.warn(`Failed to extract start or duration from line: ${line}`);
+        return null;
+      }
+
+      const [, start] = startResult;
+      const [, dur] = durResult;
 
       // Clean up subtitle text by removing HTML tags and decoding HTML entities
       const htmlText = line

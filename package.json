@@ -3,9 +3,10 @@
   "version": "1.1.5",
   "type": "module",
   "description": "A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options.",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "tsc"
   },
   "keywords": [
     "youtube",
@@ -31,9 +32,13 @@
   "homepage": "https://github.com/devhims/youtube-caption-extractor",
   "license": "ISC",
   "dependencies": {
+    "@types/he": "^1.2.0",
+    "@types/lodash": "^4.14.194",
     "axios": "^1.4.0",
     "he": "^1.2.0",
     "lodash": "^4.17.21",
-    "striptags": "^3.2.0"
+    "striptags": "^3.2.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.4"
   }
 }
