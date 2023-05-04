@@ -31,15 +31,9 @@
   "homepage": "https://github.com/devhims/youtube-caption-extractor",
   "license": "ISC",
   "dependencies": {
-    "@babel/plugin-transform-modules-commonjs": "^7.21.5",
     "axios": "^1.4.0",
     "he": "^1.2.0",
     "lodash": "^4.17.21",
     "striptags": "^3.2.0"
-  },
-  "devDependencies": {
-    "@babel/cli": "^7.21.5",
-    "@babel/core": "^7.21.8",
-    "@babel/preset-env": "^7.21.5"
   }
 }
