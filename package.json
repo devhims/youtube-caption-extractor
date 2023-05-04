@@ -1,11 +1,11 @@
 {
   "name": "youtube-caption-extractor",
   "version": "1.1.0",
+  "type": "module",
   "description": "A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options.",
-  "main": "dist/index.js",
+  "main": "src/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "babel src -d dist"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "youtube",
@@ -31,6 +31,7 @@
   "homepage": "https://github.com/devhims/youtube-caption-extractor",
   "license": "ISC",
   "dependencies": {
+    "@babel/plugin-transform-modules-commonjs": "^7.21.5",
     "axios": "^1.4.0",
     "he": "^1.2.0",
     "lodash": "^4.17.21",
