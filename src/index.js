@@ -1,6 +1,8 @@
 import he from 'he';
 import axios from 'axios';
-import { find } from 'lodash';
+import lodash from 'lodash';
+const { find } = lodash;
+
 import striptags from 'striptags';
 
 export const getSubtitles = async ({ videoID, lang = 'en' }) => {
