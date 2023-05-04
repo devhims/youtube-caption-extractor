@@ -1,10 +1,11 @@
 {
   "name": "youtube-caption-extractor",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options.",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "babel src -d dist"
   },
   "keywords": [
     "youtube",
@@ -17,8 +18,17 @@
   ],
   "author": {
     "name": "Himanshu Gupta",
-    "email": "thinktank.himanshu@gmail.com"
+    "email": "thinktank.himanshu@gmail.com",
+    "url": "https://github.com/devhims"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devhims/youtube-caption-extractor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devhims/youtube-caption-extractor/issues"
+  },
+  "homepage": "https://github.com/devhims/youtube-caption-extractor",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.4.0",
@@ -26,12 +36,9 @@
     "lodash": "^4.17.21",
     "striptags": "^3.2.0"
   },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/yourusername/youtube-caption-extractor.git"
-  },
-  "bugs": {
-    "url": "https://github.com/yourusername/youtube-caption-extractor/issues"
-  },
-  "homepage": "https://github.com/yourusername/youtube-caption-extractor"
+  "devDependencies": {
+    "@babel/cli": "^7.21.5",
+    "@babel/core": "^7.21.8",
+    "@babel/preset-env": "^7.21.5"
+  }
 }
