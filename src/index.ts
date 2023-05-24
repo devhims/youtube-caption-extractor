@@ -1,5 +1,4 @@
 import he from 'he';
-import axios from 'axios';
 import lodash from 'lodash';
 import striptags from 'striptags';
 const { find } = lodash;
@@ -25,7 +24,8 @@ export const getSubtitles = async ({
   lang = 'en',
 }: Options): Promise<Subtitle[]> => {
   // Fetch YouTube video page data
-  const { data } = await axios.get(`https://youtube.com/watch?v=${videoID}`);
+  const response = await fetch(`https://youtube.com/watch?v=${videoID}`);
+  const data = await response.text();
 
   // Check if the video page contains captions
   if (!data.includes('captionTracks')) {
@@ -58,7 +58,8 @@ export const getSubtitles = async ({
   }
 
   // Fetch subtitles XML from the subtitle track URL
-  const { data: transcript } = await axios.get(subtitle.baseUrl);
+  const subtitlesResponse = await fetch(subtitle.baseUrl);
+  const transcript = await subtitlesResponse.text();
 
   // Define regex patterns for extracting start and duration times
   const startRegex = /start="([\d.]+)"/;
@@ -70,15 +71,14 @@ export const getSubtitles = async ({
     .replace('</transcript>', '')
     .split('</text>')
     .filter((line: string) => line && line.trim())
-    .map((line: string) => {
+    .reduce((acc: Subtitle[], line: string) => {
       // Extract start and duration times using regex patterns
-
       const startResult = startRegex.exec(line);
       const durResult = durRegex.exec(line);
 
       if (!startResult || !durResult) {
         console.warn(`Failed to extract start or duration from line: ${line}`);
-        return null;
+        return acc;
       }
 
       const [, start] = startResult;
@@ -93,12 +93,14 @@ export const getSubtitles = async ({
       const text = striptags(decodedText);
 
       // Create a subtitle object with start, duration, and text properties
-      return {
+      acc.push({
         start,
         dur,
         text,
-      };
-    });
+      });
+
+      return acc;
+    }, []);
 
   return lines;
 };
