@@ -4,7 +4,7 @@
   "description": "A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options.",
   "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "build": "tsc"
   },
   "keywords": [
@@ -33,11 +33,16 @@
   "dependencies": {
     "@types/he": "^1.2.0",
     "@types/lodash": "^4.14.194",
-    "axios": "^1.4.0",
     "he": "^1.2.0",
     "lodash": "^4.17.21",
     "striptags": "^3.2.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"
+  },
+  "devDependencies": {
+    "@jest/types": "^29.5.0",
+    "@types/jest": "^29.5.1",
+    "jest": "^29.5.0",
+    "ts-jest": "^29.1.0"
   }
 }
