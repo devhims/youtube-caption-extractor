@@ -32,9 +32,7 @@
   "license": "ISC",
   "dependencies": {
     "@types/he": "^1.2.0",
-    "@types/lodash": "^4.14.194",
     "he": "^1.2.0",
-    "lodash": "^4.17.21",
     "striptags": "^3.2.0",
     "ts-node": "^10.9.1",
     "typescript": "^5.0.4"

@@ -1,5 +1,4 @@
 import he from 'he';
-import { find } from 'lodash';
 import striptags from 'striptags';
 
 interface Subtitle {
@@ -72,9 +71,11 @@ export const getVideoDetails = async ({
 
   // Find the appropriate subtitle language track
   const subtitle =
-    find(captionTracks, { vssId: `.${lang}` }) ||
-    find(captionTracks, { vssId: `a.${lang}` }) ||
-    find(captionTracks, ({ vssId }) => vssId && vssId.match(`.${lang}`));
+    captionTracks.find((track: CaptionTrack) => track.vssId === `.${lang}`) ||
+    captionTracks.find((track: CaptionTrack) => track.vssId === `a.${lang}`) ||
+    captionTracks.find(
+      (track: CaptionTrack) => track.vssId && track.vssId.match(`.${lang}`)
+    );
 
   // Check if the subtitle language track exists
   if (!subtitle?.baseUrl) {
@@ -166,9 +167,11 @@ export const getSubtitles = async ({
 
   // Find the appropriate subtitle language track
   const subtitle =
-    find(captionTracks, { vssId: `.${lang}` }) ||
-    find(captionTracks, { vssId: `a.${lang}` }) ||
-    find(captionTracks, ({ vssId }) => vssId && vssId.match(`.${lang}`));
+    captionTracks.find((track: CaptionTrack) => track.vssId === `.${lang}`) ||
+    captionTracks.find((track: CaptionTrack) => track.vssId === `a.${lang}`) ||
+    captionTracks.find(
+      (track: CaptionTrack) => track.vssId && track.vssId.match(`.${lang}`)
+    );
 
   // Check if the subtitle language track exists
   if (!subtitle?.baseUrl) {
