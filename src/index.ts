@@ -1,7 +1,6 @@
 import he from 'he';
-import lodash from 'lodash';
+import { find } from 'lodash';
 import striptags from 'striptags';
-const { find } = lodash;
 
 interface Subtitle {
   start: string;

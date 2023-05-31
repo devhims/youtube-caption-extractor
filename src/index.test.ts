@@ -9,8 +9,8 @@ describe('getVideoDetails function', () => {
   });
 
   test('it should return an object with title, description, and subtitles properties', () => {
-    // console.log('Title: ', videoDetails.title);
-    // console.log('Description: ', videoDetails.description);
+    console.log('Title: ', videoDetails.title);
+    console.log('Description: ', videoDetails.description);
     expect(videoDetails).toHaveProperty('title');
     expect(videoDetails).toHaveProperty('description');
     expect(videoDetails).toHaveProperty('subtitles');
