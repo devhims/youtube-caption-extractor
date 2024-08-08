@@ -3,3 +3,9 @@ dist
 
 *.log
 .DS_Store
+
+
+/sample/.next/
+/sample/out/
+/sample/build/
+/sample/node_modules/

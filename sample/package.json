@@ -9,9 +9,11 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "he": "^1.2.0",
     "next": "14.2.5",
     "react": "^18",
     "react-dom": "^18",
+    "striptags": "^3.2.0",
     "youtube-caption-extractor": "^1.4.3"
   },
   "devDependencies": {
