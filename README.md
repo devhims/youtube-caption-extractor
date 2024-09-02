@@ -1,17 +1,13 @@
-# YouTube Caption Extractor
+# GA YouTube Caption Extractor
 
-A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
-
-## What's new in v1.4.2
-
-- TypeScript batteries included 🔋: The package is now shipped with TypeScript type definitions, making it easier to use in TypeScript projects.
-- Node.js and Edge runtime support: The package now supports both Node.js and Edge runtime environments, expanding its usability across different platforms.
-- Enhanced data extraction: The new `getVideoDetails` API can fetch not just the subtitles, but also the video's title and description.
+A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options.
 
 ## Installation
 
-```sh
-npm install youtube-caption-extractor
+You can install the package using npm from GitHub Packages:
+
+```bash
+npm install @devhims/ga-youtube-caption-extractor --registry=https://npm.pkg.github.com
 ```
 
 ## Usage
