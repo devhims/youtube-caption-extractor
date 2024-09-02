@@ -22,4 +22,16 @@ describe('getVideoDetails function', () => {
     // }
     expect(Array.isArray(videoDetails.subtitles)).toBe(true);
   });
+
+  test.only('it should use a proxy when provided', async () => {
+    const options: Options = { videoID: 'GyTwVlce-rM', lang: 'en', proxyUrl: '123.456.789.00', proxyPort: 3128, proxyUsername: 'username', proxyPassword: 'password' };
+    const videoDetails = await getVideoDetails(options);
+    console.log('Title: ', videoDetails.title);
+    console.log('Description: ', videoDetails.description);
+    console.log('Subtitles: ', videoDetails.subtitles);
+
+    expect(videoDetails).toHaveProperty('title');
+    expect(videoDetails).toHaveProperty('description');
+    expect(videoDetails).toHaveProperty('subtitles');
+  });
 });

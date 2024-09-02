@@ -1,5 +1,8 @@
 import he from 'he';
 import striptags from 'striptags';
+import axios from 'axios';
+import https from 'https';
+import tunnel from 'tunnel';
 
 interface Subtitle {
   start: string;
@@ -15,6 +18,10 @@ interface CaptionTrack {
 export interface Options {
   videoID: string;
   lang?: string;
+  proxyUrl?: string;
+  proxyPort?: number;
+  proxyUsername?: string;
+  proxyPassword?: string;
 }
 
 export interface VideoDetails {
@@ -23,12 +30,34 @@ export interface VideoDetails {
   subtitles: Subtitle[];
 }
 
+const createClient = (proxyUrl: string = '', proxyPort: number = 0, proxyUsername: string = '', proxyPassword: string = '') => {
+  if (proxyUrl.length > 0 && proxyPort > 0) {
+    const agent = tunnel.httpsOverHttp({
+      proxy: {
+        host: proxyUrl,
+        port: proxyPort,
+        proxyAuth: proxyUsername && proxyPassword ? `${proxyUsername}:${proxyPassword}` : undefined,
+      },
+    });
+
+    return axios.create({ httpsAgent: agent });
+  }
+
+  return axios.create();
+};
+
 export const getVideoDetails = async ({
   videoID,
   lang = 'en',
+  proxyUrl = '',
+  proxyPort = 0,
+  proxyUsername = '',
+  proxyPassword = '',
 }: Options): Promise<VideoDetails> => {
-  const response = await fetch(`https://youtube.com/watch?v=${videoID}`);
-  const data = await response.text();
+
+  const client = createClient(proxyUrl, proxyPort, proxyUsername, proxyPassword);
+
+  const { data } = await client.get(`https://youtube.com/watch?v=${videoID}`);
 
   // Extract title and description from the page data
   const titleMatch = data.match(
@@ -142,10 +171,16 @@ export const getVideoDetails = async ({
 export const getSubtitles = async ({
   videoID,
   lang = 'en',
+  proxyUrl = '',
+  proxyPort = 0,
+  proxyUsername = '',
+  proxyPassword = '',
 }: Options): Promise<Subtitle[]> => {
+
+  const client = createClient(proxyUrl, proxyPort, proxyUsername, proxyPassword);
+
   // Fetch YouTube video page data
-  const response = await fetch(`https://youtube.com/watch?v=${videoID}`);
-  const data = await response.text();
+  const { data } = await client.get(`https://youtube.com/watch?v=${videoID}`);
 
   // Check if the video page contains captions
   if (!data.includes('captionTracks')) {
