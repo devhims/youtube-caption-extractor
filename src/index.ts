@@ -23,6 +23,73 @@ export interface VideoDetails {
   subtitles: Subtitle[];
 }
 
+const YT_PLAYER_URL = 'https://www.youtube.com/youtubei/v1/player?key='; // api key appended
+
+async function fetchCaptionTracks(videoID: string) {
+  // 1) Pull the watch page
+  const watchHTML = await (await fetch(`https://www.youtube.com/watch?v=${videoID}`)).text();
+
+  // 2) Grab the InnerTube API key
+  const keyMatch = watchHTML.match(/"INNERTUBE_API_KEY":"([^"]+)"/);
+  if (!keyMatch) throw new Error('INNERTUBE_API_KEY not found – YouTube layout changed');
+  const apiKey = keyMatch[1];
+
+  // 3) Call the InnerTube player endpoint
+  const innertubeResp = await fetch(`${YT_PLAYER_URL}${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      context: { client: { clientName: 'ANDROID', clientVersion: '20.10.38' } },
+      videoId: videoID,
+    }),
+  });
+  const playerData = await innertubeResp.json();
+
+  // 4) Return captionTracks (or empty array)
+  return (
+    playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []
+  );
+}
+
+
+function extracted(transcript: string, startRegex: RegExp, durRegex: RegExp) {
+  return transcript
+      .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
+      .replace('</transcript>', '')
+      .split('</text>')
+      .filter((line: string) => line && line.trim())
+      .reduce((acc: Subtitle[], line: string) => {
+        // Extract start and duration times using regex patterns
+        const startResult = startRegex.exec(line);
+        const durResult = durRegex.exec(line);
+
+        if (!startResult || !durResult) {
+          console.warn(`Failed to extract start or duration from line: ${line}`);
+          return acc;
+        }
+
+        const [, start] = startResult;
+        const [, dur] = durResult;
+
+        // Clean up subtitle text by removing HTML tags and decoding HTML entities
+        const htmlText = line
+            .replace(/<text.+>/, '')
+            .replace(/&amp;/gi, '&')
+            .replace(/<\/?[^>]+(>|$)/g, '');
+        const decodedText = he.decode(htmlText);
+        const text = striptags(decodedText);
+
+        // Create a subtitle object with start, duration, and text properties
+        acc.push({
+          start,
+          dur,
+          text,
+        });
+
+        return acc;
+      }, []);
+}
+
 export const getVideoDetails = async ({
   videoID,
   lang = 'en',
@@ -43,31 +110,12 @@ export const getVideoDetails = async ({
     ? descriptionMatch[1]
     : 'No description found';
 
-  // Check if the video page contains captions
-  if (!data.includes('captionTracks')) {
+  // Retrieve caption tracks via InnerTube (watch-page no longer holds them)
+  const captionTracks = await fetchCaptionTracks(videoID);
+  if (!captionTracks.length) {
     console.warn(`No captions found for video: ${videoID}`);
-    return {
-      title,
-      description,
-      subtitles: [],
-    };
+    return { title, description, subtitles: [] };
   }
-
-  // Extract caption tracks JSON string from video page data
-  const regex = /"captionTracks":(\[.*?\])/;
-  const regexResult = regex.exec(data);
-
-  if (!regexResult) {
-    console.warn(`Failed to extract captionTracks from video: ${videoID}`);
-    return {
-      title,
-      description,
-      subtitles: [],
-    };
-  }
-
-  const [_, captionTracksJson] = regexResult;
-  const captionTracks = JSON.parse(captionTracksJson);
 
   // Find the appropriate subtitle language track
   const subtitle =
@@ -88,7 +136,9 @@ export const getVideoDetails = async ({
   }
 
   // Fetch subtitles XML from the subtitle track URL
-  const subtitlesResponse = await fetch(subtitle.baseUrl);
+  const subtitlesResponse = await fetch(
+    subtitle.baseUrl.replace('&fmt=srv3', '') // force XML not JSON3
+  );
   const transcript = await subtitlesResponse.text();
 
   // Define regex patterns for extracting start and duration times
@@ -96,41 +146,7 @@ export const getVideoDetails = async ({
   const durRegex = /dur="([\d.]+)"/;
 
   // Process the subtitles XML to create an array of subtitle objects
-  const lines = transcript
-    .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
-    .replace('</transcript>', '')
-    .split('</text>')
-    .filter((line: string) => line && line.trim())
-    .reduce((acc: Subtitle[], line: string) => {
-      // Extract start and duration times using regex patterns
-      const startResult = startRegex.exec(line);
-      const durResult = durRegex.exec(line);
-
-      if (!startResult || !durResult) {
-        console.warn(`Failed to extract start or duration from line: ${line}`);
-        return acc;
-      }
-
-      const [, start] = startResult;
-      const [, dur] = durResult;
-
-      // Clean up subtitle text by removing HTML tags and decoding HTML entities
-      const htmlText = line
-        .replace(/<text.+>/, '')
-        .replace(/&amp;/gi, '&')
-        .replace(/<\/?[^>]+(>|$)/g, '');
-      const decodedText = he.decode(htmlText);
-      const text = striptags(decodedText);
-
-      // Create a subtitle object with start, duration, and text properties
-      acc.push({
-        start,
-        dur,
-        text,
-      });
-
-      return acc;
-    }, []);
+  const lines = extracted(transcript, startRegex, durRegex);
 
   return {
     title,
@@ -143,27 +159,12 @@ export const getSubtitles = async ({
   videoID,
   lang = 'en',
 }: Options): Promise<Subtitle[]> => {
-  // Fetch YouTube video page data
-  const response = await fetch(`https://youtube.com/watch?v=${videoID}`);
-  const data = await response.text();
-
-  // Check if the video page contains captions
-  if (!data.includes('captionTracks')) {
+  // Directly obtain caption tracks (faster & future-proof)
+  const captionTracks = await fetchCaptionTracks(videoID);
+  if (!captionTracks.length) {
     console.warn(`No captions found for video: ${videoID}`);
     return [];
   }
-
-  // Extract caption tracks JSON string from video page data
-  const regex = /"captionTracks":(\[.*?\])/;
-  const regexResult = regex.exec(data);
-
-  if (!regexResult) {
-    console.warn(`Failed to extract captionTracks from video: ${videoID}`);
-    return [];
-  }
-
-  const [_, captionTracksJson] = regexResult;
-  const captionTracks = JSON.parse(captionTracksJson);
 
   // Find the appropriate subtitle language track
   const subtitle =
@@ -180,7 +181,7 @@ export const getSubtitles = async ({
   }
 
   // Fetch subtitles XML from the subtitle track URL
-  const subtitlesResponse = await fetch(subtitle.baseUrl);
+  const subtitlesResponse = await fetch(subtitle.baseUrl.replace('&fmt=srv3', ''));
   const transcript = await subtitlesResponse.text();
 
   // Define regex patterns for extracting start and duration times
@@ -188,41 +189,5 @@ export const getSubtitles = async ({
   const durRegex = /dur="([\d.]+)"/;
 
   // Process the subtitles XML to create an array of subtitle objects
-  const lines = transcript
-    .replace('<?xml version="1.0" encoding="utf-8" ?><transcript>', '')
-    .replace('</transcript>', '')
-    .split('</text>')
-    .filter((line: string) => line && line.trim())
-    .reduce((acc: Subtitle[], line: string) => {
-      // Extract start and duration times using regex patterns
-      const startResult = startRegex.exec(line);
-      const durResult = durRegex.exec(line);
-
-      if (!startResult || !durResult) {
-        console.warn(`Failed to extract start or duration from line: ${line}`);
-        return acc;
-      }
-
-      const [, start] = startResult;
-      const [, dur] = durResult;
-
-      // Clean up subtitle text by removing HTML tags and decoding HTML entities
-      const htmlText = line
-        .replace(/<text.+>/, '')
-        .replace(/&amp;/gi, '&')
-        .replace(/<\/?[^>]+(>|$)/g, '');
-      const decodedText = he.decode(htmlText);
-      const text = striptags(decodedText);
-
-      // Create a subtitle object with start, duration, and text properties
-      acc.push({
-        start,
-        dur,
-        text,
-      });
-
-      return acc;
-    }, []);
-
-  return lines;
+  return extracted(transcript, startRegex, durRegex);
 };
