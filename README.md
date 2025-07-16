@@ -4,9 +4,12 @@ A simple and efficient package to scrape and parse captions (subtitles) from You
 
 ## What's new in latest version (v1.8.1)
 
-- Enabled video info retrieval through InnerTube API.
-- Implemeneted dynamic API key fetching.
-- Support for serverless deployments (Vercel).
+- **Enhanced Serverless Support**: Robust serverless deployment compatibility with automatic environment detection
+- **Improved Data Extraction**: Multi-location search for video titles and descriptions with comprehensive fallback strategies
+- **Modern Transcript API**: Integration with YouTube's engagement panel transcript system for better subtitle extraction
+- **Bot Detection Bypass**: Advanced session management and header fingerprinting to avoid YouTube's anti-bot measures
+- **Dual Extraction Methods**: Automatic fallback between XML captions and JSON transcript APIs
+- **Better Error Handling**: Graceful degradation and detailed debugging for production troubleshooting
 
 ## What's new in v1.4.2
 
@@ -78,7 +81,16 @@ Returns a promise that resolves to a VideoDetails object with the following prop
 - `description` (string) - The description of the video
 - `subtitles (Subtitle[])` - An array of subtitle objects
 
-**Note:** The description is retrieved from the meta tags on the page, and may not be complete.
+**Note:** The package automatically detects the deployment environment and uses the most appropriate method for data extraction. In serverless environments, it uses YouTube's engagement panel API for enhanced compatibility.
+
+## Deployment Environments
+
+This package is optimized for both traditional server and serverless environments:
+
+- **✅ Local Development**: Full access to YouTube APIs with traditional caption extraction
+- **✅ Traditional Servers**: Works seamlessly with standard Node.js deployments
+- **✅ Serverless Platforms**: Auto-detects and adapts for Vercel, AWS Lambda, Netlify, Cloudflare Workers
+- **✅ Edge Runtime**: Compatible with edge computing environments
 
 ## Handling CORS issues in client-side applications
 
