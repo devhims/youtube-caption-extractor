@@ -196,16 +196,79 @@ async function getTranscriptFromEngagementPanel(
 
   // Extract continuation token for transcript
   const content = transcriptPanel.engagementPanelSectionListRenderer?.content;
-  const continuationItem =
-    content?.continuationItemRenderer ||
-    content?.sectionListRenderer?.contents?.[0]?.continuationItemRenderer;
 
-  if (!continuationItem?.continuationEndpoint?.continuationCommand?.token) {
+  // Debug the transcript panel structure
+  console.log(
+    `[DEBUG] Transcript panel content keys:`,
+    Object.keys(content || {})
+  );
+  if (content?.sectionListRenderer) {
+    console.log(
+      `[DEBUG] SectionListRenderer contents length:`,
+      content.sectionListRenderer.contents?.length
+    );
+    if (content.sectionListRenderer.contents?.[0]) {
+      console.log(
+        `[DEBUG] First content keys:`,
+        Object.keys(content.sectionListRenderer.contents[0])
+      );
+    }
+  }
+
+  // Try multiple ways to find the continuation token
+  let continuationItem;
+  let token;
+
+  // Method 1: Direct continuationItemRenderer
+  continuationItem = content?.continuationItemRenderer;
+  if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
+    token = continuationItem.continuationEndpoint.continuationCommand.token;
+  }
+
+  // Method 2: Inside sectionListRenderer
+  if (!token && content?.sectionListRenderer?.contents?.[0]) {
+    continuationItem =
+      content.sectionListRenderer.contents[0].continuationItemRenderer;
+    if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
+      token = continuationItem.continuationEndpoint.continuationCommand.token;
+    }
+  }
+
+  // Method 3: Look for transcriptRenderer with footer
+  if (!token && content?.sectionListRenderer?.contents) {
+    for (const item of content.sectionListRenderer.contents) {
+      if (item?.transcriptRenderer) {
+        // Look for footer with continuation
+        const footer = item.transcriptRenderer.footer;
+        if (
+          footer?.transcriptFooterRenderer?.languageMenu
+            ?.sortFilterSubMenuRenderer?.subMenuItems
+        ) {
+          // Find English or first available language
+          const menuItems =
+            footer.transcriptFooterRenderer.languageMenu
+              .sortFilterSubMenuRenderer.subMenuItems;
+          const englishItem =
+            menuItems.find(
+              (item: any) =>
+                item?.title?.toLowerCase().includes('english') ||
+                item?.selected === true
+            ) || menuItems[0];
+
+          if (englishItem?.continuation?.reloadContinuationData?.continuation) {
+            token =
+              englishItem.continuation.reloadContinuationData.continuation;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (!token) {
     console.log(`[DEBUG] No continuation token found in transcript panel`);
     return [];
   }
-
-  const token = continuationItem.continuationEndpoint.continuationCommand.token;
   console.log(`[DEBUG] Found continuation token, calling get_transcript`);
 
   // Call the get_transcript endpoint
