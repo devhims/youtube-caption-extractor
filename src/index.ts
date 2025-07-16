@@ -478,7 +478,7 @@ export const getVideoDetails = async ({
       title = nextData.videoDetails.title;
     }
 
-    // Extract description
+    // Extract description from multiple possible locations
     let description = 'No description found';
     if (videoDetails?.shortDescription) {
       description = videoDetails.shortDescription;
@@ -490,9 +490,117 @@ export const getVideoDetails = async ({
         nextData.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.description.runs
           .map((run: any) => run.text)
           .join('');
+    } else if (
+      nextData?.contents?.twoColumnWatchNextResults?.results?.results
+        ?.contents?.[0]?.videoPrimaryInfoRenderer?.videoActions?.menuRenderer
+        ?.topLevelButtons
+    ) {
+      // Look for description in primary info renderer
+      const primaryInfo =
+        nextData.contents.twoColumnWatchNextResults.results.results.contents[0]
+          .videoPrimaryInfoRenderer;
+      if (primaryInfo?.description?.runs) {
+        description = primaryInfo.description.runs
+          .map((run: any) => run.text)
+          .join('');
+      }
+    } else if (
+      nextData?.metadata?.videoMetadataRenderer?.description?.simpleText
+    ) {
+      description =
+        nextData.metadata.videoMetadataRenderer.description.simpleText;
+    } else if (nextData?.videoDetails?.shortDescription) {
+      description = nextData.videoDetails.shortDescription;
+    }
+
+    // Additional search in the secondary info renderer with alternative path
+    if (
+      description === 'No description found' &&
+      nextData?.contents?.twoColumnWatchNextResults?.results?.results?.contents
+    ) {
+      for (const content of nextData.contents.twoColumnWatchNextResults.results
+        .results.contents) {
+        if (content?.videoSecondaryInfoRenderer?.description?.runs) {
+          description = content.videoSecondaryInfoRenderer.description.runs
+            .map((run: any) => run.text)
+            .join('');
+          break;
+        }
+        if (
+          content?.videoSecondaryInfoRenderer?.attributedDescription?.content
+        ) {
+          description =
+            content.videoSecondaryInfoRenderer.attributedDescription.content;
+          break;
+        }
+      }
+    }
+
+    // Search in engagement panels for description
+    if (description === 'No description found' && nextData?.engagementPanels) {
+      for (const panel of nextData.engagementPanels) {
+        if (
+          panel?.engagementPanelSectionListRenderer?.content
+            ?.structuredDescriptionContentRenderer?.items
+        ) {
+          const items =
+            panel.engagementPanelSectionListRenderer.content
+              .structuredDescriptionContentRenderer.items;
+          for (const item of items) {
+            if (item?.videoDescriptionHeaderRenderer?.description?.runs) {
+              description = item.videoDescriptionHeaderRenderer.description.runs
+                .map((run: any) => run.text)
+                .join('');
+              break;
+            }
+            if (
+              item?.expandableVideoDescriptionBodyRenderer?.descriptionBodyText
+                ?.runs
+            ) {
+              description =
+                item.expandableVideoDescriptionBodyRenderer.descriptionBodyText.runs
+                  .map((run: any) => run.text)
+                  .join('');
+              break;
+            }
+          }
+          if (description !== 'No description found') break;
+        }
+      }
     }
 
     console.log(`[DEBUG] Video title: ${title}`);
+    console.log(
+      `[DEBUG] Video description: ${description.substring(0, 100)}${
+        description.length > 100 ? '...' : ''
+      }`
+    );
+
+    // Debug: Show available data structures for description
+    if (description === 'No description found') {
+      console.log(
+        `[DEBUG] Description not found, checking available structures...`
+      );
+      if (
+        nextData?.contents?.twoColumnWatchNextResults?.results?.results
+          ?.contents
+      ) {
+        nextData.contents.twoColumnWatchNextResults.results.results.contents.forEach(
+          (content: any, index: number) => {
+            console.log(
+              `[DEBUG] Content ${index} keys:`,
+              Object.keys(content || {})
+            );
+            if (content?.videoSecondaryInfoRenderer) {
+              console.log(
+                `[DEBUG] videoSecondaryInfoRenderer keys:`,
+                Object.keys(content.videoSecondaryInfoRenderer || {})
+              );
+            }
+          }
+        );
+      }
+    }
 
     let subtitles: Subtitle[] = [];
 

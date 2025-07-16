@@ -2,11 +2,11 @@
 
 A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
 
-## What's new in latest version (v1.6.2)
+## What's new in latest version (v1.8.1)
 
 - Enabled video info retrieval through InnerTube API.
 - Implemeneted dynamic API key fetching.
-- Support for serverless deployments.
+- Support for serverless deployments (Vercel).
 
 ## What's new in v1.4.2
 
