@@ -9,3 +9,6 @@ dist
 /sample/out/
 /sample/build/
 /sample/node_modules/
+
+IMPROVEMENTS.md
+API_KEY_EXPLANATION.md
