@@ -12,7 +12,7 @@
     "next": "14.2.5",
     "react": "^18",
     "react-dom": "^18",
-    "youtube-caption-extractor": "^1.7.0"
+    "youtube-caption-extractor": "^1.7.1"
   },
   "devDependencies": {
     "@types/node": "^20",

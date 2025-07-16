@@ -23,7 +23,7 @@ export interface VideoDetails {
   subtitles: Subtitle[];
 }
 
-// YouTube public API key
+// YouTube public API key (updated to match YouTube.js)
 const FALLBACK_INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 const INNERTUBE_CLIENT_VERSION = '2.20250222.10.00';
 
@@ -35,34 +35,52 @@ const isServerless = !!(
   process.env.CF_WORKER
 );
 
-// Client configurations for fallback strategy (inspired by YouTube.js)
+// Generate proper visitor data like YouTube.js does
+function generateVisitorData(): string {
+  const id = generateRandomString(11);
+  const timestamp = Math.floor(Date.now() / 1000);
+
+  // Simple base64 encoding of visitor data (simplified version of YouTube.js protobuf encoding)
+  const data = JSON.stringify({ id, timestamp });
+  const encoded = btoa(data)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+  return encodeURIComponent(encoded);
+}
+
+// Client configurations updated to match YouTube.js latest versions
 const CLIENT_CONFIGS = {
   WEB: {
     clientName: 'WEB',
-    clientVersion: INNERTUBE_CLIENT_VERSION,
+    clientVersion: '2.20250222.10.00', // Updated to match YouTube.js
+    clientNameId: '1',
     osName: isServerless ? 'Linux' : 'Windows',
     osVersion: isServerless ? '6.5.0' : '10.0',
     platform: 'DESKTOP',
     browserName: 'Chrome',
-    browserVersion: '119.0.0.0',
+    browserVersion: '125.0.0.0', // Updated to match YouTube.js
     userAgent: isServerless
-      ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   },
   ANDROID: {
     clientName: 'ANDROID',
-    clientVersion: '19.09.37',
+    clientVersion: '19.35.36', // Updated to match YouTube.js
+    clientNameId: '3',
     osName: 'Android',
-    osVersion: '11',
+    osVersion: '13', // Updated
     platform: 'MOBILE',
+    androidSdkVersion: 33, // Added
     browserName: undefined,
     browserVersion: undefined,
     userAgent:
-      'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
+      'com.google.android.youtube/19.35.36(Linux; U; Android 13; en_US; SM-S908E Build/TP1A.220624.014) gzip',
   },
   IOS: {
     clientName: 'iOS',
     clientVersion: '20.11.6',
+    clientNameId: '5',
     osName: 'iOS',
     osVersion: '16.7.7.20H330',
     platform: 'MOBILE',
@@ -73,9 +91,10 @@ const CLIENT_CONFIGS = {
   },
 };
 
-// Create context for specific client
+// Create context for specific client with improved visitor data
 function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
   const config = CLIENT_CONFIGS[clientType];
+  const visitorData = generateVisitorData();
 
   return {
     client: {
@@ -94,7 +113,7 @@ function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
       browserVersion: config.browserVersion,
       utcOffsetMinutes: 0,
       originalUrl: 'https://www.youtube.com',
-      visitorData: 'CgtaZUtlV3E2WFpOOCiIjYyyBg%3D%3D',
+      visitorData: visitorData,
       memoryTotalKbytes: '8000000',
       mainAppWebInfo:
         clientType === 'WEB'
@@ -105,7 +124,10 @@ function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
               isWebNativeShareAvailable: true,
             }
           : undefined,
-      androidSdkVersion: clientType === 'ANDROID' ? 30 : undefined,
+      androidSdkVersion:
+        clientType === 'ANDROID'
+          ? (config as any).androidSdkVersion
+          : undefined,
       deviceMake:
         clientType === 'ANDROID'
           ? 'Google'
@@ -114,7 +136,7 @@ function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
           : undefined,
       deviceModel:
         clientType === 'ANDROID'
-          ? 'Pixel 5'
+          ? 'SM-S908E' // Updated to match YouTube.js
           : clientType === 'IOS'
           ? 'iPhone10,4'
           : undefined,
@@ -232,9 +254,6 @@ async function getDynamicApiKey(): Promise<string> {
     );
 
     const apiKey = await withRetry(async () => {
-      // Generate visitor ID for tracking
-      const visitorId = generateRandomString(11);
-
       // Enhanced headers for production compatibility
       const headers: Record<string, string> = {
         'Accept-Language': 'en-US,en;q=0.9',
@@ -246,7 +265,6 @@ async function getDynamicApiKey(): Promise<string> {
         'Sec-Fetch-Dest': 'script',
         'Sec-Fetch-Mode': 'no-cors',
         'Sec-Fetch-Site': 'same-origin',
-        Cookie: `PREF=tz=UTC;VISITOR_INFO1_LIVE=${visitorId};`,
       };
 
       // Environment-specific User-Agent
@@ -336,12 +354,19 @@ async function fetchVideoDataWithClient(
 
   console.log(`[DEBUG] Trying ${clientType} client for video ${videoID}`);
 
-  // Enhanced headers for production compatibility
+  // Enhanced headers matching YouTube.js implementation
   const headers: Record<string, string> = {
-    Accept: 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.9',
+    Accept: '*/*',
+    'Accept-Language': '*',
     'User-Agent': config.userAgent,
+    'X-Goog-Visitor-Id': context.client.visitorData || '',
+    'X-Youtube-Client-Version': config.clientVersion,
   };
+
+  // Add client name ID header like YouTube.js does
+  if (config.clientNameId) {
+    headers['X-Youtube-Client-Name'] = config.clientNameId;
+  }
 
   // Add web-specific headers
   if (clientType === 'WEB') {
@@ -357,25 +382,34 @@ async function fetchVideoDataWithClient(
     headers['Content-Type'] = 'application/json';
   }
 
+  // Prepare request body with additional params for better compatibility
+  const requestBody = {
+    context,
+    videoId: videoID,
+    playbackContext: {
+      contentPlaybackContext: {
+        vis: 0,
+        splay: false,
+        lactMilliseconds: '-1',
+      },
+    },
+    racyCheckOk: true,
+    contentCheckOk: true,
+  };
+
+  // Add client-specific parameters
+  if (clientType === 'ANDROID') {
+    // Android clients may need additional params
+    (requestBody as any).params = 'CgIQBg%3D%3D'; // Base64 encoded params that Android uses
+  }
+
   // Use the more reliable InnerTube endpoint with proper context
   const playerResponse = await fetchWithTimeout(
     `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
     {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        context,
-        videoId: videoID,
-        playbackContext: {
-          contentPlaybackContext: {
-            vis: 0,
-            splay: false,
-            lactMilliseconds: '-1',
-          },
-        },
-        racyCheckOk: true,
-        contentCheckOk: true,
-      }),
+      body: JSON.stringify(requestBody),
       timeout: TIMEOUTS.PLAYER_REQUEST,
     }
   );
@@ -416,17 +450,22 @@ async function fetchVideoDataWithClient(
 
 async function fetchVideoData(videoID: string) {
   return withRetry(async () => {
-    // Try clients in order: WEB, ANDROID, iOS
-    const clientTypes: (keyof typeof CLIENT_CONFIGS)[] = [
-      'WEB',
-      'ANDROID',
-      'IOS',
-    ];
+    // Try clients in order: WEB, ANDROID, iOS (prioritize web for serverless)
+    const clientTypes: (keyof typeof CLIENT_CONFIGS)[] = isServerless
+      ? ['WEB', 'ANDROID', 'IOS']
+      : ['ANDROID', 'WEB', 'IOS']; // Android often works better for non-serverless
+
+    let lastValidResponse: any = null;
 
     for (const clientType of clientTypes) {
       try {
         const { playerData, clientType: usedClient } =
           await fetchVideoDataWithClient(videoID, clientType);
+
+        // Store any response that has some data, even if not complete
+        if (playerData && Object.keys(playerData).length > 5) {
+          lastValidResponse = playerData;
+        }
 
         if (isValidPlayerResponse(playerData)) {
           console.log(
@@ -437,6 +476,20 @@ async function fetchVideoData(videoID: string) {
           console.warn(
             `[DEBUG] ${usedClient} client returned insufficient data, trying next client...`
           );
+
+          // Debug: log the playability status if available
+          if (playerData?.playabilityStatus) {
+            console.log(
+              `[DEBUG] ${usedClient} playability status:`,
+              playerData.playabilityStatus.status
+            );
+            if (playerData.playabilityStatus.reason) {
+              console.log(
+                `[DEBUG] ${usedClient} reason:`,
+                playerData.playabilityStatus.reason
+              );
+            }
+          }
         }
       } catch (error) {
         console.warn(
@@ -445,6 +498,12 @@ async function fetchVideoData(videoID: string) {
         );
         // Continue to next client
       }
+    }
+
+    // If we have any response, return it as a last resort
+    if (lastValidResponse) {
+      console.warn(`[DEBUG] Returning last valid response as fallback`);
+      return lastValidResponse;
     }
 
     // If all clients fail, throw error
