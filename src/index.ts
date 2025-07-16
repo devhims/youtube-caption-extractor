@@ -339,29 +339,110 @@ async function fetchCaptionTracks(videoID: string) {
   try {
     const playerData = await fetchVideoData(videoID);
 
+    // Debug: Log the structure we're getting
+    console.log(`[DEBUG] Serverless: ${isServerless}, VideoID: ${videoID}`);
+    console.log(`[DEBUG] Player response keys:`, Object.keys(playerData || {}));
+    console.log(`[DEBUG] Has captions key:`, !!playerData?.captions);
+
+    if (playerData?.captions) {
+      console.log(`[DEBUG] Captions keys:`, Object.keys(playerData.captions));
+      console.log(
+        `[DEBUG] Has playerCaptionsTracklistRenderer:`,
+        !!playerData.captions.playerCaptionsTracklistRenderer
+      );
+
+      if (playerData.captions.playerCaptionsTracklistRenderer) {
+        const renderer = playerData.captions.playerCaptionsTracklistRenderer;
+        console.log(`[DEBUG] Renderer keys:`, Object.keys(renderer));
+        console.log(`[DEBUG] Has captionTracks:`, !!renderer.captionTracks);
+        console.log(
+          `[DEBUG] CaptionTracks length:`,
+          renderer.captionTracks?.length || 0
+        );
+
+        if (renderer.captionTracks?.length > 0) {
+          console.log(
+            `[DEBUG] First caption track:`,
+            JSON.stringify(renderer.captionTracks[0], null, 2)
+          );
+        }
+      }
+    }
+
     // Extract caption tracks from player response
     const captionTracks =
       playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks ??
       [];
 
+    console.log(`[DEBUG] Extracted ${captionTracks.length} caption tracks`);
+
     if (!captionTracks.length) {
-      // Try alternative caption extraction from adaptive formats
-      const adaptiveFormats = playerData?.streamingData?.adaptiveFormats ?? [];
-      const captionFormats = adaptiveFormats.filter(
-        (format: any) => format.mimeType && format.mimeType.includes('text/')
+      console.log(
+        `[DEBUG] No standard caption tracks found, checking adaptive formats...`
       );
 
-      if (captionFormats.length > 0) {
-        return captionFormats.map((format: any) => ({
-          baseUrl: format.url,
-          vssId: format.languageCode || 'unknown',
-        }));
+      // Debug adaptive formats
+      const streamingData = playerData?.streamingData;
+      console.log(`[DEBUG] Has streamingData:`, !!streamingData);
+
+      if (streamingData) {
+        console.log(`[DEBUG] StreamingData keys:`, Object.keys(streamingData));
+        const adaptiveFormats = streamingData.adaptiveFormats || [];
+        console.log(`[DEBUG] AdaptiveFormats length:`, adaptiveFormats.length);
+
+        // Try alternative caption extraction from adaptive formats
+        const captionFormats = adaptiveFormats.filter(
+          (format: any) => format.mimeType && format.mimeType.includes('text/')
+        );
+
+        console.log(
+          `[DEBUG] Found ${captionFormats.length} text formats in adaptive streams`
+        );
+
+        if (captionFormats.length > 0) {
+          console.log(
+            `[DEBUG] First text format:`,
+            JSON.stringify(captionFormats[0], null, 2)
+          );
+          return captionFormats.map((format: any) => ({
+            baseUrl: format.url,
+            vssId: format.languageCode || 'unknown',
+          }));
+        }
       }
+
+      // Final debug: Check if there are any other caption-related fields
+      console.log(
+        `[DEBUG] Searching for any caption-related fields in player response...`
+      );
+      const playerDataStr = JSON.stringify(playerData);
+      const captionMatches = playerDataStr.match(/caption/gi);
+      console.log(
+        `[DEBUG] Found ${
+          captionMatches?.length || 0
+        } occurrences of 'caption' in response`
+      );
+
+      // Check for alternative caption fields
+      if (playerData?.captions?.playerCaptionsRenderer) {
+        console.log(
+          `[DEBUG] Found playerCaptionsRenderer:`,
+          JSON.stringify(playerData.captions.playerCaptionsRenderer, null, 2)
+        );
+      }
+
+      // Check for subtitle fields
+      const subtitleMatches = playerDataStr.match(/subtitle/gi);
+      console.log(
+        `[DEBUG] Found ${
+          subtitleMatches?.length || 0
+        } occurrences of 'subtitle' in response`
+      );
     }
 
     return captionTracks;
   } catch (error) {
-    console.error('Error fetching caption tracks:', error);
+    console.error(`[DEBUG] Error in fetchCaptionTracks:`, error);
     throw error;
   }
 }
@@ -421,12 +502,24 @@ export const getVideoDetails = async ({
     const description =
       videoDetails?.shortDescription || 'No description found';
 
+    console.log(`[DEBUG] Video title: ${title}`);
+
     // Retrieve caption tracks
     const captionTracks = await fetchCaptionTracks(videoID);
     if (!captionTracks.length) {
-      console.warn(`No captions found for video: ${videoID}`);
+      console.warn(
+        `[DEBUG] No captions found for video: ${videoID} (language: ${lang})`
+      );
       return { title, description, subtitles: [] };
     }
+
+    console.log(
+      `[DEBUG] Available caption tracks:`,
+      captionTracks.map((track: CaptionTrack) => ({
+        vssId: track.vssId,
+        hasBaseUrl: !!track.baseUrl,
+      }))
+    );
 
     // Find the appropriate subtitle language track
     const subtitle =
@@ -438,9 +531,21 @@ export const getVideoDetails = async ({
         (track: CaptionTrack) => track.vssId && track.vssId.match(`.${lang}`)
       );
 
+    console.log(`[DEBUG] Looking for language: ${lang}`);
+    console.log(
+      `[DEBUG] Selected subtitle track:`,
+      subtitle
+        ? { vssId: subtitle.vssId, hasBaseUrl: !!subtitle.baseUrl }
+        : 'none'
+    );
+
     // Check if the subtitle language track exists
     if (!subtitle?.baseUrl) {
-      console.warn(`Could not find ${lang} captions for ${videoID}`);
+      console.warn(`[DEBUG] Could not find ${lang} captions for ${videoID}`);
+      console.log(
+        `[DEBUG] Available languages:`,
+        captionTracks.map((track: CaptionTrack) => track.vssId).join(', ')
+      );
       return {
         title,
         description,
@@ -464,6 +569,9 @@ export const getVideoDetails = async ({
       }
 
       const transcript = await subtitlesResponse.text();
+      console.log(
+        `[DEBUG] Subtitle XML length: ${transcript.length} characters`
+      );
 
       // Define regex patterns for extracting start and duration times
       const startRegex = /start="([\d.]+)"/;
@@ -473,13 +581,15 @@ export const getVideoDetails = async ({
       return extractSubtitlesFromXML(transcript, startRegex, durRegex);
     }, 'Subtitle fetch');
 
+    console.log(`[DEBUG] Extracted ${lines.length} subtitle lines`);
+
     return {
       title,
       description,
       subtitles: lines,
     };
   } catch (error) {
-    console.error('Error getting video details:', error);
+    console.error(`[DEBUG] Error in getVideoDetails:`, error);
     throw error;
   }
 };
