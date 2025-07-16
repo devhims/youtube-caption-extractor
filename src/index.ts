@@ -35,41 +35,100 @@ const isServerless = !!(
   process.env.CF_WORKER
 );
 
-// Enhanced context with environment-aware settings
-const INNERTUBE_CONTEXT = {
-  client: {
-    hl: 'en',
-    gl: 'US',
+// Client configurations for fallback strategy (inspired by YouTube.js)
+const CLIENT_CONFIGS = {
+  WEB: {
     clientName: 'WEB',
     clientVersion: INNERTUBE_CLIENT_VERSION,
     osName: isServerless ? 'Linux' : 'Windows',
     osVersion: isServerless ? '6.5.0' : '10.0',
     platform: 'DESKTOP',
-    clientFormFactor: 'UNKNOWN_FORM_FACTOR',
-    userInterfaceTheme: 'USER_INTERFACE_THEME_LIGHT',
-    timeZone: 'UTC',
     browserName: 'Chrome',
     browserVersion: '119.0.0.0',
-    utcOffsetMinutes: 0,
-    originalUrl: 'https://www.youtube.com',
-    visitorData: 'CgtaZUtlV3E2WFpOOCiIjYyyBg%3D%3D',
-    memoryTotalKbytes: '8000000',
-    mainAppWebInfo: {
-      graftUrl: 'https://www.youtube.com',
-      pwaInstallabilityStatus: 'PWA_INSTALLABILITY_STATUS_UNKNOWN',
-      webDisplayMode: 'WEB_DISPLAY_MODE_BROWSER',
-      isWebNativeShareAvailable: true,
-    },
+    userAgent: isServerless
+      ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
   },
-  user: {
-    enableSafetyMode: false,
-    lockedSafetyMode: false,
+  ANDROID: {
+    clientName: 'ANDROID',
+    clientVersion: '19.09.37',
+    osName: 'Android',
+    osVersion: '11',
+    platform: 'MOBILE',
+    browserName: undefined,
+    browserVersion: undefined,
+    userAgent:
+      'com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip',
   },
-  request: {
-    useSsl: true,
-    internalExperimentFlags: [],
+  IOS: {
+    clientName: 'iOS',
+    clientVersion: '20.11.6',
+    osName: 'iOS',
+    osVersion: '16.7.7.20H330',
+    platform: 'MOBILE',
+    browserName: undefined,
+    browserVersion: undefined,
+    userAgent:
+      'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
   },
 };
+
+// Create context for specific client
+function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
+  const config = CLIENT_CONFIGS[clientType];
+
+  return {
+    client: {
+      hl: 'en',
+      gl: 'US',
+      clientName: config.clientName,
+      clientVersion: config.clientVersion,
+      osName: config.osName,
+      osVersion: config.osVersion,
+      platform: config.platform,
+      clientFormFactor:
+        clientType === 'WEB' ? 'UNKNOWN_FORM_FACTOR' : 'SMALL_FORM_FACTOR',
+      userInterfaceTheme: 'USER_INTERFACE_THEME_LIGHT',
+      timeZone: 'UTC',
+      browserName: config.browserName,
+      browserVersion: config.browserVersion,
+      utcOffsetMinutes: 0,
+      originalUrl: 'https://www.youtube.com',
+      visitorData: 'CgtaZUtlV3E2WFpOOCiIjYyyBg%3D%3D',
+      memoryTotalKbytes: '8000000',
+      mainAppWebInfo:
+        clientType === 'WEB'
+          ? {
+              graftUrl: 'https://www.youtube.com',
+              pwaInstallabilityStatus: 'PWA_INSTALLABILITY_STATUS_UNKNOWN',
+              webDisplayMode: 'WEB_DISPLAY_MODE_BROWSER',
+              isWebNativeShareAvailable: true,
+            }
+          : undefined,
+      androidSdkVersion: clientType === 'ANDROID' ? 30 : undefined,
+      deviceMake:
+        clientType === 'ANDROID'
+          ? 'Google'
+          : clientType === 'IOS'
+          ? 'Apple'
+          : undefined,
+      deviceModel:
+        clientType === 'ANDROID'
+          ? 'Pixel 5'
+          : clientType === 'IOS'
+          ? 'iPhone10,4'
+          : undefined,
+    },
+    user: {
+      enableSafetyMode: false,
+      lockedSafetyMode: false,
+    },
+    request: {
+      useSsl: true,
+      internalExperimentFlags: [],
+    },
+  };
+}
 
 // Cache for the dynamically fetched API key
 let cachedApiKey: string | null = null;
@@ -191,13 +250,7 @@ async function getDynamicApiKey(): Promise<string> {
       };
 
       // Environment-specific User-Agent
-      if (isServerless) {
-        headers['User-Agent'] =
-          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
-      } else {
-        headers['User-Agent'] =
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
-      }
+      headers['User-Agent'] = CLIENT_CONFIGS.WEB.userAgent;
 
       // Fetch from YouTube's service worker data endpoint
       const response = await fetchWithTimeout(
@@ -263,76 +316,142 @@ async function getApiKey(): Promise<string> {
   }
 }
 
+// Check if response has sufficient data
+function isValidPlayerResponse(playerData: any): boolean {
+  // Must have either captions or videoDetails or streamingData
+  return !!(
+    playerData?.captions ||
+    playerData?.videoDetails ||
+    playerData?.streamingData
+  );
+}
+
+async function fetchVideoDataWithClient(
+  videoID: string,
+  clientType: keyof typeof CLIENT_CONFIGS
+) {
+  const apiKey = await getApiKey();
+  const context = createClientContext(clientType);
+  const config = CLIENT_CONFIGS[clientType];
+
+  console.log(`[DEBUG] Trying ${clientType} client for video ${videoID}`);
+
+  // Enhanced headers for production compatibility
+  const headers: Record<string, string> = {
+    Accept: 'application/json, text/plain, */*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'User-Agent': config.userAgent,
+  };
+
+  // Add web-specific headers
+  if (clientType === 'WEB') {
+    headers['Content-Type'] = 'application/json';
+    headers['Origin'] = 'https://www.youtube.com';
+    headers['Referer'] = 'https://www.youtube.com/';
+    headers['DNT'] = '1';
+    headers['Sec-GPC'] = '1';
+    headers['Sec-Fetch-Dest'] = 'empty';
+    headers['Sec-Fetch-Mode'] = 'cors';
+    headers['Sec-Fetch-Site'] = 'same-origin';
+  } else {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  // Use the more reliable InnerTube endpoint with proper context
+  const playerResponse = await fetchWithTimeout(
+    `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        context,
+        videoId: videoID,
+        playbackContext: {
+          contentPlaybackContext: {
+            vis: 0,
+            splay: false,
+            lactMilliseconds: '-1',
+          },
+        },
+        racyCheckOk: true,
+        contentCheckOk: true,
+      }),
+      timeout: TIMEOUTS.PLAYER_REQUEST,
+    }
+  );
+
+  if (!playerResponse.ok) {
+    throw new Error(
+      `Player endpoint failed with ${clientType}: ${playerResponse.status} ${playerResponse.statusText}`
+    );
+  }
+
+  const playerData = await playerResponse.json();
+
+  // Check for errors in response
+  if (playerData.playabilityStatus?.status === 'ERROR') {
+    throw new Error(
+      `Video not available with ${clientType}: ${
+        playerData.playabilityStatus.reason || 'Unknown error'
+      }`
+    );
+  }
+
+  console.log(
+    `[DEBUG] ${clientType} response keys:`,
+    Object.keys(playerData || {})
+  );
+  console.log(`[DEBUG] ${clientType} has captions:`, !!playerData?.captions);
+  console.log(
+    `[DEBUG] ${clientType} has videoDetails:`,
+    !!playerData?.videoDetails
+  );
+  console.log(
+    `[DEBUG] ${clientType} has streamingData:`,
+    !!playerData?.streamingData
+  );
+
+  return { playerData, clientType };
+}
+
 async function fetchVideoData(videoID: string) {
   return withRetry(async () => {
-    // Get API key (dynamic with fallback)
-    const apiKey = await getApiKey();
+    // Try clients in order: WEB, ANDROID, iOS
+    const clientTypes: (keyof typeof CLIENT_CONFIGS)[] = [
+      'WEB',
+      'ANDROID',
+      'IOS',
+    ];
 
-    // Enhanced headers for production compatibility
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json, text/plain, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      Origin: 'https://www.youtube.com',
-      Referer: 'https://www.youtube.com/',
-      DNT: '1',
-      'Sec-GPC': '1',
-      'Sec-Fetch-Dest': 'empty',
-      'Sec-Fetch-Mode': 'cors',
-      'Sec-Fetch-Site': 'same-origin',
-    };
+    for (const clientType of clientTypes) {
+      try {
+        const { playerData, clientType: usedClient } =
+          await fetchVideoDataWithClient(videoID, clientType);
 
-    // Environment-specific User-Agent
-    if (isServerless) {
-      headers['User-Agent'] =
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
-    } else {
-      headers['User-Agent'] =
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
-    }
-
-    // Use the more reliable InnerTube endpoint with proper context
-    const playerResponse = await fetchWithTimeout(
-      `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          context: INNERTUBE_CONTEXT,
-          videoId: videoID,
-          playbackContext: {
-            contentPlaybackContext: {
-              vis: 0,
-              splay: false,
-              lactMilliseconds: '-1',
-            },
-          },
-          racyCheckOk: true,
-          contentCheckOk: true,
-        }),
-        timeout: TIMEOUTS.PLAYER_REQUEST,
+        if (isValidPlayerResponse(playerData)) {
+          console.log(
+            `[DEBUG] Successfully got valid response from ${usedClient} client`
+          );
+          return playerData;
+        } else {
+          console.warn(
+            `[DEBUG] ${usedClient} client returned insufficient data, trying next client...`
+          );
+        }
+      } catch (error) {
+        console.warn(
+          `[DEBUG] ${clientType} client failed:`,
+          error instanceof Error ? error.message : 'Unknown error'
+        );
+        // Continue to next client
       }
+    }
+
+    // If all clients fail, throw error
+    throw new Error(
+      `All clients (${clientTypes.join(', ')}) failed to retrieve video data`
     );
-
-    if (!playerResponse.ok) {
-      throw new Error(
-        `Player endpoint failed: ${playerResponse.status} ${playerResponse.statusText}`
-      );
-    }
-
-    const playerData = await playerResponse.json();
-
-    // Check for errors in response
-    if (playerData.playabilityStatus?.status === 'ERROR') {
-      throw new Error(
-        `Video not available: ${
-          playerData.playabilityStatus.reason || 'Unknown error'
-        }`
-      );
-    }
-
-    return playerData;
-  }, 'Video data fetch');
+  }, 'Video data fetch with multi-client fallback');
 }
 
 async function fetchCaptionTracks(videoID: string) {
