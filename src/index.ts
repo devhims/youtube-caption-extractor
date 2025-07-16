@@ -26,14 +26,24 @@ export interface VideoDetails {
 // YouTube public API key
 const FALLBACK_INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
 const INNERTUBE_CLIENT_VERSION = '2.20250222.10.00';
+
+// Detect serverless environment
+const isServerless = !!(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.NETLIFY ||
+  process.env.CF_WORKER
+);
+
+// Enhanced context with environment-aware settings
 const INNERTUBE_CONTEXT = {
   client: {
     hl: 'en',
     gl: 'US',
     clientName: 'WEB',
     clientVersion: INNERTUBE_CLIENT_VERSION,
-    osName: 'Windows',
-    osVersion: '10.0',
+    osName: isServerless ? 'Linux' : 'Windows',
+    osVersion: isServerless ? '6.5.0' : '10.0',
     platform: 'DESKTOP',
     clientFormFactor: 'UNKNOWN_FORM_FACTOR',
     userInterfaceTheme: 'USER_INTERFACE_THEME_LIGHT',
@@ -43,10 +53,21 @@ const INNERTUBE_CONTEXT = {
     utcOffsetMinutes: 0,
     originalUrl: 'https://www.youtube.com',
     visitorData: 'CgtaZUtlV3E2WFpOOCiIjYyyBg%3D%3D',
+    memoryTotalKbytes: '8000000',
+    mainAppWebInfo: {
+      graftUrl: 'https://www.youtube.com',
+      pwaInstallabilityStatus: 'PWA_INSTALLABILITY_STATUS_UNKNOWN',
+      webDisplayMode: 'WEB_DISPLAY_MODE_BROWSER',
+      isWebNativeShareAvailable: true,
+    },
   },
   user: {
     enableSafetyMode: false,
     lockedSafetyMode: false,
+  },
+  request: {
+    useSsl: true,
+    internalExperimentFlags: [],
   },
 };
 
@@ -54,6 +75,19 @@ const INNERTUBE_CONTEXT = {
 let cachedApiKey: string | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+// Production-ready timeouts and retry settings
+const TIMEOUTS = {
+  API_KEY_FETCH: isServerless ? 8000 : 10000, // Shorter timeout for serverless
+  PLAYER_REQUEST: isServerless ? 15000 : 20000,
+  SUBTITLE_FETCH: isServerless ? 10000 : 15000,
+};
+
+const RETRY_CONFIG = {
+  MAX_RETRIES: isServerless ? 2 : 3,
+  INITIAL_DELAY: 1000,
+  BACKOFF_FACTOR: 1.5,
+};
 
 function generateRandomString(length: number): string {
   const chars =
@@ -65,6 +99,66 @@ function generateRandomString(length: number): string {
   return result;
 }
 
+// Enhanced fetch with timeout and error handling
+async function fetchWithTimeout(
+  url: string | URL,
+  options: RequestInit & { timeout?: number } = {}
+): Promise<Response> {
+  const { timeout = 10000, ...fetchOptions } = options;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    const response = await fetch(url, {
+      ...fetchOptions,
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeout}ms`);
+    }
+    throw error;
+  }
+}
+
+// Retry mechanism for critical operations
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  context: string,
+  maxRetries: number = RETRY_CONFIG.MAX_RETRIES
+): Promise<T> {
+  let lastError: Error;
+
+  for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      if (attempt <= maxRetries) {
+        const delay =
+          RETRY_CONFIG.INITIAL_DELAY *
+          Math.pow(RETRY_CONFIG.BACKOFF_FACTOR, attempt - 1);
+        console.warn(
+          `${context} failed (attempt ${attempt}/${maxRetries + 1}): ${
+            lastError.message
+          }. Retrying in ${delay}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw new Error(
+    `${context} failed after ${maxRetries + 1} attempts: ${lastError!.message}`
+  );
+}
+
 async function getDynamicApiKey(): Promise<string> {
   try {
     // Check cache first
@@ -74,45 +168,71 @@ async function getDynamicApiKey(): Promise<string> {
       return cachedApiKey;
     }
 
-    console.log('Fetching dynamic API key from YouTube...');
+    console.log(
+      `Fetching dynamic API key from YouTube... (serverless: ${isServerless})`
+    );
 
-    // Generate visitor ID for tracking
-    const visitorId = generateRandomString(11);
+    const apiKey = await withRetry(async () => {
+      // Generate visitor ID for tracking
+      const visitorId = generateRandomString(11);
 
-    // Fetch from YouTube's service worker data endpoint (same as YouTube.js)
-    const response = await fetch('https://www.youtube.com/sw.js_data', {
-      headers: {
-        'Accept-Language': 'en-US',
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+      // Enhanced headers for production compatibility
+      const headers: Record<string, string> = {
+        'Accept-Language': 'en-US,en;q=0.9',
         Accept: '*/*',
         Referer: 'https://www.youtube.com/sw.js',
+        Origin: 'https://www.youtube.com',
+        DNT: '1',
+        'Sec-GPC': '1',
+        'Sec-Fetch-Dest': 'script',
+        'Sec-Fetch-Mode': 'no-cors',
+        'Sec-Fetch-Site': 'same-origin',
         Cookie: `PREF=tz=UTC;VISITOR_INFO1_LIVE=${visitorId};`,
-      },
-    });
+      };
 
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch dynamic API key: ${response.status} ${response.statusText}`
+      // Environment-specific User-Agent
+      if (isServerless) {
+        headers['User-Agent'] =
+          'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+      } else {
+        headers['User-Agent'] =
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+      }
+
+      // Fetch from YouTube's service worker data endpoint
+      const response = await fetchWithTimeout(
+        'https://www.youtube.com/sw.js_data',
+        {
+          headers,
+          timeout: TIMEOUTS.API_KEY_FETCH,
+        }
       );
-    }
 
-    const text = await response.text();
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch dynamic API key: ${response.status} ${response.statusText}`
+        );
+      }
 
-    // Parse JSPB response (starts with )]}')
-    if (!text.startsWith(")]}'")) {
-      throw new Error('Invalid JSPB response format');
-    }
+      const text = await response.text();
 
-    const data = JSON.parse(text.replace(/^\)\]\}'/, ''));
-    const ytcfg = data[0][2];
+      // Parse JSPB response (starts with )]}')
+      if (!text.startsWith(")]}'")) {
+        throw new Error('Invalid JSPB response format');
+      }
 
-    // Extract API key from the configuration
-    const [, apiKey] = ytcfg;
+      const data = JSON.parse(text.replace(/^\)\]\}'/, ''));
+      const ytcfg = data[0][2];
 
-    if (!apiKey || typeof apiKey !== 'string') {
-      throw new Error('API key not found in response');
-    }
+      // Extract API key from the configuration
+      const [, apiKey] = ytcfg;
+
+      if (!apiKey || typeof apiKey !== 'string') {
+        throw new Error('API key not found in response');
+      }
+
+      return apiKey;
+    }, 'Dynamic API key fetch');
 
     // Cache the key
     cachedApiKey = apiKey;
@@ -136,7 +256,7 @@ async function getApiKey(): Promise<string> {
   } catch (error) {
     // Fall back to hardcoded key
     console.warn(
-      'Falling back to hardcoded API key due to error:',
+      `Falling back to hardcoded API key due to error (serverless: ${isServerless}):`,
       error instanceof Error ? error.message : 'Unknown error'
     );
     return FALLBACK_INNERTUBE_API_KEY;
@@ -144,20 +264,39 @@ async function getApiKey(): Promise<string> {
 }
 
 async function fetchVideoData(videoID: string) {
-  try {
+  return withRetry(async () => {
     // Get API key (dynamic with fallback)
     const apiKey = await getApiKey();
 
+    // Enhanced headers for production compatibility
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      Origin: 'https://www.youtube.com',
+      Referer: 'https://www.youtube.com/',
+      DNT: '1',
+      'Sec-GPC': '1',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+    };
+
+    // Environment-specific User-Agent
+    if (isServerless) {
+      headers['User-Agent'] =
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+    } else {
+      headers['User-Agent'] =
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36';
+    }
+
     // Use the more reliable InnerTube endpoint with proper context
-    const playerResponse = await fetch(
+    const playerResponse = await fetchWithTimeout(
       `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-        },
+        headers,
         body: JSON.stringify({
           context: INNERTUBE_CONTEXT,
           videoId: videoID,
@@ -171,6 +310,7 @@ async function fetchVideoData(videoID: string) {
           racyCheckOk: true,
           contentCheckOk: true,
         }),
+        timeout: TIMEOUTS.PLAYER_REQUEST,
       }
     );
 
@@ -192,10 +332,7 @@ async function fetchVideoData(videoID: string) {
     }
 
     return playerData;
-  } catch (error) {
-    console.error('Error fetching video data:', error);
-    throw error;
-  }
+  }, 'Video data fetch');
 }
 
 async function fetchCaptionTracks(videoID: string) {
@@ -311,23 +448,30 @@ export const getVideoDetails = async ({
       };
     }
 
-    // Fetch subtitles XML from the subtitle track URL
-    const subtitlesResponse = await fetch(
-      subtitle.baseUrl.replace('&fmt=srv3', '') // force XML not JSON3
-    );
+    // Fetch subtitles XML from the subtitle track URL with retry
+    const lines = await withRetry(async () => {
+      const subtitlesResponse = await fetchWithTimeout(
+        subtitle.baseUrl.replace('&fmt=srv3', ''), // force XML not JSON3
+        {
+          timeout: TIMEOUTS.SUBTITLE_FETCH,
+        }
+      );
 
-    if (!subtitlesResponse.ok) {
-      throw new Error(`Failed to fetch subtitles: ${subtitlesResponse.status}`);
-    }
+      if (!subtitlesResponse.ok) {
+        throw new Error(
+          `Failed to fetch subtitles: ${subtitlesResponse.status}`
+        );
+      }
 
-    const transcript = await subtitlesResponse.text();
+      const transcript = await subtitlesResponse.text();
 
-    // Define regex patterns for extracting start and duration times
-    const startRegex = /start="([\d.]+)"/;
-    const durRegex = /dur="([\d.]+)"/;
+      // Define regex patterns for extracting start and duration times
+      const startRegex = /start="([\d.]+)"/;
+      const durRegex = /dur="([\d.]+)"/;
 
-    // Process the subtitles XML to create an array of subtitle objects
-    const lines = extractSubtitlesFromXML(transcript, startRegex, durRegex);
+      // Process the subtitles XML to create an array of subtitle objects
+      return extractSubtitlesFromXML(transcript, startRegex, durRegex);
+    }, 'Subtitle fetch');
 
     return {
       title,
@@ -368,23 +512,30 @@ export const getSubtitles = async ({
       return [];
     }
 
-    // Fetch subtitles XML from the subtitle track URL
-    const subtitlesResponse = await fetch(
-      subtitle.baseUrl.replace('&fmt=srv3', '')
-    );
+    // Fetch subtitles XML from the subtitle track URL with retry
+    return await withRetry(async () => {
+      const subtitlesResponse = await fetchWithTimeout(
+        subtitle.baseUrl.replace('&fmt=srv3', ''),
+        {
+          timeout: TIMEOUTS.SUBTITLE_FETCH,
+        }
+      );
 
-    if (!subtitlesResponse.ok) {
-      throw new Error(`Failed to fetch subtitles: ${subtitlesResponse.status}`);
-    }
+      if (!subtitlesResponse.ok) {
+        throw new Error(
+          `Failed to fetch subtitles: ${subtitlesResponse.status}`
+        );
+      }
 
-    const transcript = await subtitlesResponse.text();
+      const transcript = await subtitlesResponse.text();
 
-    // Define regex patterns for extracting start and duration times
-    const startRegex = /start="([\d.]+)"/;
-    const durRegex = /dur="([\d.]+)"/;
+      // Define regex patterns for extracting start and duration times
+      const startRegex = /start="([\d.]+)"/;
+      const durRegex = /dur="([\d.]+)"/;
 
-    // Process the subtitles XML to create an array of subtitle objects
-    return extractSubtitlesFromXML(transcript, startRegex, durRegex);
+      // Process the subtitles XML to create an array of subtitle objects
+      return extractSubtitlesFromXML(transcript, startRegex, durRegex);
+    }, 'Subtitle fetch');
   } catch (error) {
     console.error('Error getting subtitles:', error);
     throw error;
