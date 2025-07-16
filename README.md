@@ -2,6 +2,12 @@
 
 A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
 
+## What's new in latest version (v1.6.1)
+
+- Enabled video info retrieval through InnerTube API.
+- Implemeneted dynamic API key fetching.
+- Support for serverless deployments.
+
 ## What's new in v1.4.2
 
 - TypeScript batteries included 🔋: The package is now shipped with TypeScript type definitions, making it easier to use in TypeScript projects.
