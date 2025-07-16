@@ -234,10 +234,19 @@ async function getTranscriptFromEngagementPanel(
     );
   }
 
+  // Check for different token/params structures
   if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
     token = continuationItem.continuationEndpoint.continuationCommand.token;
     console.log(
-      `[DEBUG] Found token via Method 1:`,
+      `[DEBUG] Found token via Method 1 (continuationCommand):`,
+      token.substring(0, 50) + '...'
+    );
+  } else if (
+    continuationItem?.continuationEndpoint?.getTranscriptEndpoint?.params
+  ) {
+    token = continuationItem.continuationEndpoint.getTranscriptEndpoint.params;
+    console.log(
+      `[DEBUG] Found token via Method 1 (getTranscriptEndpoint):`,
       token.substring(0, 50) + '...'
     );
   }
@@ -292,7 +301,7 @@ async function getTranscriptFromEngagementPanel(
   const sessionData = generateSessionData();
   const transcriptPayload = {
     ...sessionData,
-    continuation: token,
+    params: token,
   };
 
   const transcriptResponse = await fetchInnerTube(
