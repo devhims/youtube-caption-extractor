@@ -35,6 +35,22 @@ const isServerless = !!(
   process.env.CF_WORKER
 );
 
+// Add request timing to avoid bot detection
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = isServerless ? 100 : 50; // Minimum ms between requests
+
+async function respectRateLimit(): Promise<void> {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    const delay = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  lastRequestTime = Date.now();
+}
+
 // Generate proper visitor data like YouTube.js does
 function generateVisitorData(): string {
   const id = generateRandomString(11);
@@ -47,6 +63,16 @@ function generateVisitorData(): string {
     .replace(/\//g, '_')
     .replace(/=/g, '');
   return encodeURIComponent(encoded);
+}
+
+// Generate a session fingerprint for consistency
+function generateSessionFingerprint() {
+  const fingerprint = generateRandomString(16);
+  return {
+    fingerprint,
+    sessionToken: `${fingerprint}_${Date.now()}`,
+    deviceId: generateRandomString(32),
+  };
 }
 
 // Client configurations updated to match YouTube.js latest versions
@@ -89,14 +115,29 @@ const CLIENT_CONFIGS = {
     userAgent:
       'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
   },
+  // Add TV client for better success in serverless environments
+  TV: {
+    clientName: 'TVHTML5',
+    clientVersion: '7.20250219.14.00',
+    clientNameId: '7',
+    osName: 'ChromiumStylePlatform',
+    osVersion: 'Version',
+    platform: 'TV',
+    browserName: 'Cobalt',
+    browserVersion: 'Version',
+    userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+  },
 };
+
+// Session fingerprint for consistent requests
+const sessionData = generateSessionFingerprint();
 
 // Create context for specific client with improved visitor data
 function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
   const config = CLIENT_CONFIGS[clientType];
   const visitorData = generateVisitorData();
 
-  return {
+  const baseContext = {
     client: {
       hl: 'en',
       gl: 'US',
@@ -106,7 +147,9 @@ function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
       osVersion: config.osVersion,
       platform: config.platform,
       clientFormFactor:
-        clientType === 'WEB' ? 'UNKNOWN_FORM_FACTOR' : 'SMALL_FORM_FACTOR',
+        clientType === 'WEB' || clientType === 'TV'
+          ? 'UNKNOWN_FORM_FACTOR'
+          : 'SMALL_FORM_FACTOR',
       userInterfaceTheme: 'USER_INTERFACE_THEME_LIGHT',
       timeZone: 'UTC',
       browserName: config.browserName,
@@ -150,6 +193,15 @@ function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
       internalExperimentFlags: [],
     },
   };
+
+  // Add TV-specific context
+  if (clientType === 'TV') {
+    (baseContext.client as any).screenDensityFloat = 1.0;
+    (baseContext.client as any).screenHeightPoints = 1080;
+    (baseContext.client as any).screenWidthPoints = 1920;
+  }
+
+  return baseContext;
 }
 
 // Cache for the dynamically fetched API key
@@ -180,12 +232,15 @@ function generateRandomString(length: number): string {
   return result;
 }
 
-// Enhanced fetch with timeout and error handling
+// Enhanced fetch with better browser simulation
 async function fetchWithTimeout(
   url: string | URL,
   options: RequestInit & { timeout?: number } = {}
 ): Promise<Response> {
   const { timeout = 10000, ...fetchOptions } = options;
+
+  // Add rate limiting
+  await respectRateLimit();
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -240,6 +295,7 @@ async function withRetry<T>(
   );
 }
 
+// Enhanced API key fetching with better bot avoidance
 async function getDynamicApiKey(): Promise<string> {
   try {
     // Check cache first
@@ -254,55 +310,65 @@ async function getDynamicApiKey(): Promise<string> {
     );
 
     const apiKey = await withRetry(async () => {
-      // Enhanced headers for production compatibility
+      // Enhanced headers for production compatibility with better fingerprinting
       const headers: Record<string, string> = {
         'Accept-Language': 'en-US,en;q=0.9',
         Accept: '*/*',
-        Referer: 'https://www.youtube.com/sw.js',
+        Referer: 'https://www.youtube.com/',
         Origin: 'https://www.youtube.com',
-        DNT: '1',
-        'Sec-GPC': '1',
-        'Sec-Fetch-Dest': 'script',
-        'Sec-Fetch-Mode': 'no-cors',
-        'Sec-Fetch-Site': 'same-origin',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
       };
+
+      // Add browser-specific headers for better disguise
+      if (isServerless) {
+        headers['Sec-Ch-Ua'] =
+          '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"';
+        headers['Sec-Ch-Ua-Mobile'] = '?0';
+        headers['Sec-Ch-Ua-Platform'] = '"Linux"';
+        headers['Sec-Fetch-Dest'] = 'empty';
+        headers['Sec-Fetch-Mode'] = 'cors';
+        headers['Sec-Fetch-Site'] = 'same-origin';
+      }
 
       // Environment-specific User-Agent
       headers['User-Agent'] = CLIENT_CONFIGS.WEB.userAgent;
 
-      // Fetch from YouTube's service worker data endpoint
-      const response = await fetchWithTimeout(
-        'https://www.youtube.com/sw.js_data',
-        {
-          headers,
-          timeout: TIMEOUTS.API_KEY_FETCH,
-        }
-      );
+      // Try alternative endpoint first for serverless
+      const endpoint = isServerless
+        ? 'https://www.youtube.com/youtubei/v1/config'
+        : 'https://www.youtube.com/sw.js_data';
+
+      const response = await fetchWithTimeout(endpoint, {
+        headers,
+        timeout: TIMEOUTS.API_KEY_FETCH,
+      });
 
       if (!response.ok) {
+        // Fallback to original endpoint
+        if (isServerless && endpoint.includes('config')) {
+          const fallbackResponse = await fetchWithTimeout(
+            'https://www.youtube.com/sw.js_data',
+            { headers, timeout: TIMEOUTS.API_KEY_FETCH }
+          );
+
+          if (!fallbackResponse.ok) {
+            throw new Error(
+              `Failed to fetch dynamic API key: ${fallbackResponse.status}`
+            );
+          }
+
+          const text = await fallbackResponse.text();
+          return parseApiKeyFromResponse(text);
+        }
+
         throw new Error(
           `Failed to fetch dynamic API key: ${response.status} ${response.statusText}`
         );
       }
 
       const text = await response.text();
-
-      // Parse JSPB response (starts with )]}')
-      if (!text.startsWith(")]}'")) {
-        throw new Error('Invalid JSPB response format');
-      }
-
-      const data = JSON.parse(text.replace(/^\)\]\}'/, ''));
-      const ytcfg = data[0][2];
-
-      // Extract API key from the configuration
-      const [, apiKey] = ytcfg;
-
-      if (!apiKey || typeof apiKey !== 'string') {
-        throw new Error('API key not found in response');
-      }
-
-      return apiKey;
+      return parseApiKeyFromResponse(text);
     }, 'Dynamic API key fetch');
 
     // Cache the key
@@ -318,6 +384,36 @@ async function getDynamicApiKey(): Promise<string> {
     );
     throw error;
   }
+}
+
+// Helper function to parse API key from different response formats
+function parseApiKeyFromResponse(text: string): string {
+  // Try JSPB format first
+  if (text.startsWith(")]}'")) {
+    const data = JSON.parse(text.replace(/^\)\]\}'/, ''));
+    const ytcfg = data[0][2];
+    const [, apiKey] = ytcfg;
+
+    if (apiKey && typeof apiKey === 'string') {
+      return apiKey;
+    }
+  }
+
+  // Try to extract from different formats
+  const apiKeyMatch = text.match(
+    /["']INNERTUBE_API_KEY["']:\s*["']([^"']+)["']/
+  );
+  if (apiKeyMatch) {
+    return apiKeyMatch[1];
+  }
+
+  // Look for other patterns
+  const altMatch = text.match(/["']apiKey["']:\s*["']([^"']+)["']/);
+  if (altMatch) {
+    return altMatch[1];
+  }
+
+  throw new Error('API key not found in response');
 }
 
 async function getApiKey(): Promise<string> {
@@ -401,6 +497,11 @@ async function fetchVideoDataWithClient(
   if (clientType === 'ANDROID') {
     // Android clients may need additional params
     (requestBody as any).params = 'CgIQBg%3D%3D'; // Base64 encoded params that Android uses
+  } else if (clientType === 'TV') {
+    // TV clients may need different params to bypass bot detection
+    (requestBody as any).thirdParty = {
+      embedUrl: 'https://www.youtube.com/',
+    };
   }
 
   // Use the more reliable InnerTube endpoint with proper context
@@ -450,12 +551,13 @@ async function fetchVideoDataWithClient(
 
 async function fetchVideoData(videoID: string) {
   return withRetry(async () => {
-    // Try clients in order: WEB, ANDROID, iOS (prioritize web for serverless)
+    // Prioritize different clients based on environment and try TV client for serverless
     const clientTypes: (keyof typeof CLIENT_CONFIGS)[] = isServerless
-      ? ['WEB', 'ANDROID', 'IOS']
+      ? ['TV', 'ANDROID', 'WEB', 'IOS'] // TV client often bypasses bot detection
       : ['ANDROID', 'WEB', 'IOS']; // Android often works better for non-serverless
 
     let lastValidResponse: any = null;
+    let loginRequiredCount = 0;
 
     for (const clientType of clientTypes) {
       try {
@@ -465,6 +567,38 @@ async function fetchVideoData(videoID: string) {
         // Store any response that has some data, even if not complete
         if (playerData && Object.keys(playerData).length > 5) {
           lastValidResponse = playerData;
+        }
+
+        // Check for LOGIN_REQUIRED specifically
+        if (playerData?.playabilityStatus?.status === 'LOGIN_REQUIRED') {
+          loginRequiredCount++;
+          console.warn(
+            `[DEBUG] ${usedClient} returned LOGIN_REQUIRED (${loginRequiredCount}/${clientTypes.length})`
+          );
+
+          // If this is a serverless environment and we get LOGIN_REQUIRED,
+          // try a different approach with the embed endpoint
+          if (isServerless && clientType === 'TV' && loginRequiredCount === 1) {
+            try {
+              console.log(`[DEBUG] Trying embed endpoint for ${videoID}`);
+              const embedData = await fetchEmbedVideoData(videoID);
+              if (embedData && isValidPlayerResponse(embedData)) {
+                console.log(
+                  `[DEBUG] Successfully got data from embed endpoint`
+                );
+                return embedData;
+              }
+            } catch (embedError) {
+              console.warn(
+                `[DEBUG] Embed endpoint failed:`,
+                embedError instanceof Error
+                  ? embedError.message
+                  : 'Unknown error'
+              );
+            }
+          }
+
+          continue; // Try next client
         }
 
         if (isValidPlayerResponse(playerData)) {
@@ -506,11 +640,81 @@ async function fetchVideoData(videoID: string) {
       return lastValidResponse;
     }
 
+    // If all clients returned LOGIN_REQUIRED, try alternative strategies
+    if (loginRequiredCount === clientTypes.length) {
+      console.warn(
+        `[DEBUG] All clients returned LOGIN_REQUIRED, trying alternative approaches...`
+      );
+
+      try {
+        // Try the embed endpoint as a last resort
+        const embedData = await fetchEmbedVideoData(videoID);
+        if (embedData && isValidPlayerResponse(embedData)) {
+          console.log(
+            `[DEBUG] Successfully got data from embed endpoint as fallback`
+          );
+          return embedData;
+        }
+      } catch (embedError) {
+        console.warn(
+          `[DEBUG] Embed fallback failed:`,
+          embedError instanceof Error ? embedError.message : 'Unknown error'
+        );
+      }
+    }
+
     // If all clients fail, throw error
     throw new Error(
-      `All clients (${clientTypes.join(', ')}) failed to retrieve video data`
+      `All clients (${clientTypes.join(
+        ', '
+      )}) failed to retrieve video data. ${loginRequiredCount} returned LOGIN_REQUIRED.`
     );
   }, 'Video data fetch with multi-client fallback');
+}
+
+// Alternative embed endpoint for bot detection bypass
+async function fetchEmbedVideoData(videoID: string) {
+  console.log(`[DEBUG] Trying embed endpoint for video ${videoID}`);
+
+  // Use embed endpoint which is often less strict
+  const embedUrl = `https://www.youtube.com/embed/${videoID}`;
+
+  const headers: Record<string, string> = {
+    'User-Agent': CLIENT_CONFIGS.WEB.userAgent,
+    Referer: 'https://www.youtube.com/',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Cache-Control': 'no-cache',
+  };
+
+  const response = await fetchWithTimeout(embedUrl, {
+    headers,
+    timeout: TIMEOUTS.PLAYER_REQUEST,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Embed endpoint failed: ${response.status}`);
+  }
+
+  const html = await response.text();
+
+  // Extract player configuration from embed page
+  const configMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
+  if (!configMatch) {
+    throw new Error('Could not extract player config from embed page');
+  }
+
+  try {
+    const playerData = JSON.parse(configMatch[1]);
+    console.log(
+      `[DEBUG] Embed extracted player data with keys:`,
+      Object.keys(playerData)
+    );
+    return playerData;
+  } catch (parseError) {
+    throw new Error('Failed to parse player config from embed page');
+  }
 }
 
 async function fetchCaptionTracks(videoID: string) {
