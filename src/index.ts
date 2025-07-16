@@ -348,15 +348,39 @@ async function getTranscriptFromEngagementPanel(
   }
 
   const subtitles: Subtitle[] = [];
+  let debugCount = 0;
 
   for (const segment of segments) {
     if (segment.transcriptSegmentRenderer) {
       const renderer = segment.transcriptSegmentRenderer;
-      console.log(`[DEBUG] Segment renderer keys:`, Object.keys(renderer));
+
+      // Only debug first 3 segments to avoid excessive logging
+      if (debugCount < 3) {
+        console.log(`[DEBUG] Segment renderer keys:`, Object.keys(renderer));
+
+        // Debug snippet structure
+        if (renderer.snippet) {
+          console.log(`[DEBUG] Snippet keys:`, Object.keys(renderer.snippet));
+          console.log(
+            `[DEBUG] Snippet structure:`,
+            JSON.stringify(renderer.snippet, null, 2)
+          );
+        }
+        debugCount++;
+      }
 
       const startMs = parseInt(renderer.startMs || '0');
       const endMs = parseInt(renderer.endMs || '0');
-      const text = renderer.snippet?.simpleText || '';
+
+      // Try different text extraction paths
+      let text = '';
+      if (renderer.snippet?.simpleText) {
+        text = renderer.snippet.simpleText;
+      } else if (renderer.snippet?.runs) {
+        text = renderer.snippet.runs.map((run: any) => run.text).join('');
+      } else if (renderer.snippet?.text) {
+        text = renderer.snippet.text;
+      }
 
       console.log(
         `[DEBUG] Segment: startMs=${startMs}, endMs=${endMs}, text="${text}"`
