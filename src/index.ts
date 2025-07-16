@@ -23,9 +23,8 @@ export interface VideoDetails {
   subtitles: Subtitle[];
 }
 
-// YouTube public API key (updated to match YouTube.js)
+// YouTube public API key
 const FALLBACK_INNERTUBE_API_KEY = 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8';
-const INNERTUBE_CLIENT_VERSION = '2.20250222.10.00';
 
 // Detect serverless environment
 const isServerless = !!(
@@ -35,212 +34,165 @@ const isServerless = !!(
   process.env.CF_WORKER
 );
 
-// Add request timing to avoid bot detection
-let lastRequestTime = 0;
-const MIN_REQUEST_INTERVAL = isServerless ? 100 : 50; // Minimum ms between requests
+// For serverless environments, use a completely different strategy
+// that doesn't rely on InnerTube API which has bot detection
+async function getVideoDataServerless(videoID: string) {
+  console.log(`[DEBUG] Using serverless strategy for video ${videoID}`);
 
-async function respectRateLimit(): Promise<void> {
-  const now = Date.now();
-  const timeSinceLastRequest = now - lastRequestTime;
+  try {
+    // Strategy 1: Try to get data from YouTube's oEmbed API (no bot detection)
+    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoID}&format=json`;
 
-  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
-    const delay = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    const oembedResponse = await fetch(oembedUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; VideoBot/1.0)',
+      },
+    });
+
+    if (oembedResponse.ok) {
+      const oembedData = await oembedResponse.json();
+      console.log(`[DEBUG] Got oEmbed data:`, oembedData);
+
+      // Now try to get subtitle data from a different approach
+      const subtitles = await getSubtitlesViaTranscriptAPI(videoID);
+
+      return {
+        videoDetails: {
+          title: oembedData.title || 'Unknown title',
+          shortDescription: 'Description from oEmbed',
+        },
+        captions: {
+          playerCaptionsTracklistRenderer: {
+            captionTracks: subtitles,
+          },
+        },
+      };
+    }
+  } catch (error) {
+    console.warn(
+      `[DEBUG] oEmbed strategy failed:`,
+      error instanceof Error ? error.message : 'Unknown error'
+    );
   }
 
-  lastRequestTime = Date.now();
+  // Strategy 2: Try to extract from watch page HTML (more reliable for serverless)
+  try {
+    console.log(`[DEBUG] Trying watch page extraction for ${videoID}`);
+    return await extractFromWatchPage(videoID);
+  } catch (error) {
+    console.warn(
+      `[DEBUG] Watch page strategy failed:`,
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+  }
+
+  throw new Error('All serverless strategies failed');
 }
 
-// Generate proper visitor data like YouTube.js does
-function generateVisitorData(): string {
-  const id = generateRandomString(11);
-  const timestamp = Math.floor(Date.now() / 1000);
+// Extract video data directly from the watch page HTML
+async function extractFromWatchPage(videoID: string) {
+  const watchUrl = `https://www.youtube.com/watch?v=${videoID}`;
 
-  // Simple base64 encoding of visitor data (simplified version of YouTube.js protobuf encoding)
-  const data = JSON.stringify({ id, timestamp });
-  const encoded = btoa(data)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-  return encodeURIComponent(encoded);
-}
-
-// Generate a session fingerprint for consistency
-function generateSessionFingerprint() {
-  const fingerprint = generateRandomString(16);
-  return {
-    fingerprint,
-    sessionToken: `${fingerprint}_${Date.now()}`,
-    deviceId: generateRandomString(32),
-  };
-}
-
-// Client configurations updated to match YouTube.js latest versions
-const CLIENT_CONFIGS = {
-  WEB: {
-    clientName: 'WEB',
-    clientVersion: '2.20250222.10.00', // Updated to match YouTube.js
-    clientNameId: '1',
-    osName: isServerless ? 'Linux' : 'Windows',
-    osVersion: isServerless ? '6.5.0' : '10.0',
-    platform: 'DESKTOP',
-    browserName: 'Chrome',
-    browserVersion: '125.0.0.0', // Updated to match YouTube.js
-    userAgent: isServerless
-      ? 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-      : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-  },
-  ANDROID: {
-    clientName: 'ANDROID',
-    clientVersion: '19.35.36', // Updated to match YouTube.js
-    clientNameId: '3',
-    osName: 'Android',
-    osVersion: '13', // Updated
-    platform: 'MOBILE',
-    androidSdkVersion: 33, // Added
-    browserName: undefined,
-    browserVersion: undefined,
-    userAgent:
-      'com.google.android.youtube/19.35.36(Linux; U; Android 13; en_US; SM-S908E Build/TP1A.220624.014) gzip',
-  },
-  IOS: {
-    clientName: 'iOS',
-    clientVersion: '20.11.6',
-    clientNameId: '5',
-    osName: 'iOS',
-    osVersion: '16.7.7.20H330',
-    platform: 'MOBILE',
-    browserName: undefined,
-    browserVersion: undefined,
-    userAgent:
-      'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
-  },
-  // Add TV client for better success in serverless environments
-  TV: {
-    clientName: 'TVHTML5',
-    clientVersion: '7.20250219.14.00',
-    clientNameId: '7',
-    osName: 'ChromiumStylePlatform',
-    osVersion: 'Version',
-    platform: 'TV',
-    browserName: 'Cobalt',
-    browserVersion: 'Version',
-    userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
-  },
-};
-
-// Session fingerprint for consistent requests
-const sessionData = generateSessionFingerprint();
-
-// Create context for specific client with improved visitor data
-function createClientContext(clientType: keyof typeof CLIENT_CONFIGS) {
-  const config = CLIENT_CONFIGS[clientType];
-  const visitorData = generateVisitorData();
-
-  const baseContext = {
-    client: {
-      hl: 'en',
-      gl: 'US',
-      clientName: config.clientName,
-      clientVersion: config.clientVersion,
-      osName: config.osName,
-      osVersion: config.osVersion,
-      platform: config.platform,
-      clientFormFactor:
-        clientType === 'WEB' || clientType === 'TV'
-          ? 'UNKNOWN_FORM_FACTOR'
-          : 'SMALL_FORM_FACTOR',
-      userInterfaceTheme: 'USER_INTERFACE_THEME_LIGHT',
-      timeZone: 'UTC',
-      browserName: config.browserName,
-      browserVersion: config.browserVersion,
-      utcOffsetMinutes: 0,
-      originalUrl: 'https://www.youtube.com',
-      visitorData: visitorData,
-      memoryTotalKbytes: '8000000',
-      mainAppWebInfo:
-        clientType === 'WEB'
-          ? {
-              graftUrl: 'https://www.youtube.com',
-              pwaInstallabilityStatus: 'PWA_INSTALLABILITY_STATUS_UNKNOWN',
-              webDisplayMode: 'WEB_DISPLAY_MODE_BROWSER',
-              isWebNativeShareAvailable: true,
-            }
-          : undefined,
-      androidSdkVersion:
-        clientType === 'ANDROID'
-          ? (config as any).androidSdkVersion
-          : undefined,
-      deviceMake:
-        clientType === 'ANDROID'
-          ? 'Google'
-          : clientType === 'IOS'
-          ? 'Apple'
-          : undefined,
-      deviceModel:
-        clientType === 'ANDROID'
-          ? 'SM-S908E' // Updated to match YouTube.js
-          : clientType === 'IOS'
-          ? 'iPhone10,4'
-          : undefined,
-    },
-    user: {
-      enableSafetyMode: false,
-      lockedSafetyMode: false,
-    },
-    request: {
-      useSsl: true,
-      internalExperimentFlags: [],
-    },
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    Accept:
+      'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.5',
+    'Cache-Control': 'no-cache',
+    'Upgrade-Insecure-Requests': '1',
   };
 
-  // Add TV-specific context
-  if (clientType === 'TV') {
-    (baseContext.client as any).screenDensityFloat = 1.0;
-    (baseContext.client as any).screenHeightPoints = 1080;
-    (baseContext.client as any).screenWidthPoints = 1920;
+  const response = await fetch(watchUrl, { headers });
+
+  if (!response.ok) {
+    throw new Error(`Watch page request failed: ${response.status}`);
   }
 
-  return baseContext;
-}
+  const html = await response.text();
 
-// Cache for the dynamically fetched API key
-let cachedApiKey: string | null = null;
-let cacheTimestamp: number = 0;
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
-
-// Production-ready timeouts and retry settings
-const TIMEOUTS = {
-  API_KEY_FETCH: isServerless ? 8000 : 10000, // Shorter timeout for serverless
-  PLAYER_REQUEST: isServerless ? 15000 : 20000,
-  SUBTITLE_FETCH: isServerless ? 10000 : 15000,
-};
-
-const RETRY_CONFIG = {
-  MAX_RETRIES: isServerless ? 2 : 3,
-  INITIAL_DELAY: 1000,
-  BACKOFF_FACTOR: 1.5,
-};
-
-function generateRandomString(length: number): string {
-  const chars =
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  // Extract ytInitialPlayerResponse from the page
+  const playerResponseMatch = html.match(
+    /var ytInitialPlayerResponse = ({.+?});/
+  );
+  if (!playerResponseMatch) {
+    throw new Error('Could not find ytInitialPlayerResponse in watch page');
   }
-  return result;
+
+  try {
+    const playerData = JSON.parse(playerResponseMatch[1]);
+    console.log(
+      `[DEBUG] Extracted player data from watch page:`,
+      Object.keys(playerData)
+    );
+    return playerData;
+  } catch (parseError) {
+    throw new Error('Failed to parse ytInitialPlayerResponse');
+  }
 }
 
-// Enhanced fetch with better browser simulation
+// Try to get subtitles using YouTube's transcript API
+async function getSubtitlesViaTranscriptAPI(
+  videoID: string
+): Promise<CaptionTrack[]> {
+  try {
+    // This is a more direct approach to get transcript data
+    // YouTube exposes transcript info through a different endpoint
+    const timedTextUrl = `https://www.youtube.com/api/timedtext?v=${videoID}&type=list`;
+
+    const response = await fetch(timedTextUrl, {
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        Referer: `https://www.youtube.com/watch?v=${videoID}`,
+      },
+    });
+
+    if (!response.ok) {
+      console.warn(`[DEBUG] Timed text API failed: ${response.status}`);
+      return [];
+    }
+
+    const xmlText = await response.text();
+    console.log(`[DEBUG] Got timed text response:`, xmlText.substring(0, 200));
+
+    // Parse the XML to extract available languages
+    const tracks: CaptionTrack[] = [];
+    const trackMatches = xmlText.matchAll(/<track[^>]+>/g);
+
+    for (const match of trackMatches) {
+      const trackXml = match[0];
+      const langCodeMatch = trackXml.match(/lang_code="([^"]+)"/);
+      const nameMatch = trackXml.match(/name="([^"]+)"/);
+
+      if (langCodeMatch) {
+        const langCode = langCodeMatch[1];
+        tracks.push({
+          baseUrl: `https://www.youtube.com/api/timedtext?v=${videoID}&lang=${langCode}`,
+          vssId: `.${langCode}`,
+        });
+      }
+    }
+
+    console.log(
+      `[DEBUG] Found ${tracks.length} caption tracks via transcript API`
+    );
+    return tracks;
+  } catch (error) {
+    console.warn(
+      `[DEBUG] Transcript API failed:`,
+      error instanceof Error ? error.message : 'Unknown error'
+    );
+    return [];
+  }
+}
+
+// Enhanced fetch with timeout and error handling
 async function fetchWithTimeout(
   url: string | URL,
   options: RequestInit & { timeout?: number } = {}
 ): Promise<Response> {
   const { timeout = 10000, ...fetchOptions } = options;
-
-  // Add rate limiting
-  await respectRateLimit();
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -266,7 +218,7 @@ async function fetchWithTimeout(
 async function withRetry<T>(
   operation: () => Promise<T>,
   context: string,
-  maxRetries: number = RETRY_CONFIG.MAX_RETRIES
+  maxRetries: number = 2
 ): Promise<T> {
   let lastError: Error;
 
@@ -277,9 +229,7 @@ async function withRetry<T>(
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (attempt <= maxRetries) {
-        const delay =
-          RETRY_CONFIG.INITIAL_DELAY *
-          Math.pow(RETRY_CONFIG.BACKOFF_FACTOR, attempt - 1);
+        const delay = 1000 * attempt; // Simple linear backoff
         console.warn(
           `${context} failed (attempt ${attempt}/${maxRetries + 1}): ${
             lastError.message
@@ -295,461 +245,88 @@ async function withRetry<T>(
   );
 }
 
-// Enhanced API key fetching with better bot avoidance
-async function getDynamicApiKey(): Promise<string> {
-  try {
-    // Check cache first
-    const now = Date.now();
-    if (cachedApiKey && now - cacheTimestamp < CACHE_DURATION) {
-      console.log('Using cached dynamic API key');
-      return cachedApiKey;
-    }
-
-    console.log(
-      `Fetching dynamic API key from YouTube... (serverless: ${isServerless})`
-    );
-
-    const apiKey = await withRetry(async () => {
-      // Enhanced headers for production compatibility with better fingerprinting
-      const headers: Record<string, string> = {
-        'Accept-Language': 'en-US,en;q=0.9',
-        Accept: '*/*',
-        Referer: 'https://www.youtube.com/',
-        Origin: 'https://www.youtube.com',
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
-      };
-
-      // Add browser-specific headers for better disguise
-      if (isServerless) {
-        headers['Sec-Ch-Ua'] =
-          '"Chromium";v="125", "Google Chrome";v="125", "Not.A/Brand";v="24"';
-        headers['Sec-Ch-Ua-Mobile'] = '?0';
-        headers['Sec-Ch-Ua-Platform'] = '"Linux"';
-        headers['Sec-Fetch-Dest'] = 'empty';
-        headers['Sec-Fetch-Mode'] = 'cors';
-        headers['Sec-Fetch-Site'] = 'same-origin';
-      }
-
-      // Environment-specific User-Agent
-      headers['User-Agent'] = CLIENT_CONFIGS.WEB.userAgent;
-
-      // Try alternative endpoint first for serverless
-      const endpoint = isServerless
-        ? 'https://www.youtube.com/youtubei/v1/config'
-        : 'https://www.youtube.com/sw.js_data';
-
-      const response = await fetchWithTimeout(endpoint, {
-        headers,
-        timeout: TIMEOUTS.API_KEY_FETCH,
-      });
-
-      if (!response.ok) {
-        // Fallback to original endpoint
-        if (isServerless && endpoint.includes('config')) {
-          const fallbackResponse = await fetchWithTimeout(
-            'https://www.youtube.com/sw.js_data',
-            { headers, timeout: TIMEOUTS.API_KEY_FETCH }
-          );
-
-          if (!fallbackResponse.ok) {
-            throw new Error(
-              `Failed to fetch dynamic API key: ${fallbackResponse.status}`
-            );
-          }
-
-          const text = await fallbackResponse.text();
-          return parseApiKeyFromResponse(text);
-        }
-
-        throw new Error(
-          `Failed to fetch dynamic API key: ${response.status} ${response.statusText}`
-        );
-      }
-
-      const text = await response.text();
-      return parseApiKeyFromResponse(text);
-    }, 'Dynamic API key fetch');
-
-    // Cache the key
-    cachedApiKey = apiKey;
-    cacheTimestamp = now;
-
-    console.log('Successfully fetched dynamic API key');
-    return apiKey;
-  } catch (error) {
-    console.warn(
-      'Failed to fetch dynamic API key:',
-      error instanceof Error ? error.message : 'Unknown error'
-    );
-    throw error;
+// Main function to get video data - uses different strategies based on environment
+async function fetchVideoData(videoID: string) {
+  if (isServerless) {
+    // For serverless environments, use alternative strategies that don't trigger bot detection
+    console.log(`[DEBUG] Using serverless environment strategy`);
+    return await getVideoDataServerless(videoID);
   }
+
+  // For local development, fall back to the original approach
+  console.log(`[DEBUG] Using local development strategy`);
+  return await getVideoDataLocal(videoID);
 }
 
-// Helper function to parse API key from different response formats
-function parseApiKeyFromResponse(text: string): string {
-  // Try JSPB format first
-  if (text.startsWith(")]}'")) {
-    const data = JSON.parse(text.replace(/^\)\]\}'/, ''));
-    const ytcfg = data[0][2];
-    const [, apiKey] = ytcfg;
+// Original approach for local development
+async function getVideoDataLocal(videoID: string) {
+  const apiKey = FALLBACK_INNERTUBE_API_KEY;
 
-    if (apiKey && typeof apiKey === 'string') {
-      return apiKey;
-    }
-  }
-
-  // Try to extract from different formats
-  const apiKeyMatch = text.match(
-    /["']INNERTUBE_API_KEY["']:\s*["']([^"']+)["']/
-  );
-  if (apiKeyMatch) {
-    return apiKeyMatch[1];
-  }
-
-  // Look for other patterns
-  const altMatch = text.match(/["']apiKey["']:\s*["']([^"']+)["']/);
-  if (altMatch) {
-    return altMatch[1];
-  }
-
-  throw new Error('API key not found in response');
-}
-
-async function getApiKey(): Promise<string> {
-  try {
-    // Try to get dynamic API key first
-    return await getDynamicApiKey();
-  } catch (error) {
-    // Fall back to hardcoded key
-    console.warn(
-      `Falling back to hardcoded API key due to error (serverless: ${isServerless}):`,
-      error instanceof Error ? error.message : 'Unknown error'
-    );
-    return FALLBACK_INNERTUBE_API_KEY;
-  }
-}
-
-// Check if response has sufficient data
-function isValidPlayerResponse(playerData: any): boolean {
-  // Must have either captions or videoDetails or streamingData
-  return !!(
-    playerData?.captions ||
-    playerData?.videoDetails ||
-    playerData?.streamingData
-  );
-}
-
-async function fetchVideoDataWithClient(
-  videoID: string,
-  clientType: keyof typeof CLIENT_CONFIGS
-) {
-  const apiKey = await getApiKey();
-  const context = createClientContext(clientType);
-  const config = CLIENT_CONFIGS[clientType];
-
-  console.log(`[DEBUG] Trying ${clientType} client for video ${videoID}`);
-
-  // Enhanced headers matching YouTube.js implementation
-  const headers: Record<string, string> = {
-    Accept: '*/*',
-    'Accept-Language': '*',
-    'User-Agent': config.userAgent,
-    'X-Goog-Visitor-Id': context.client.visitorData || '',
-    'X-Youtube-Client-Version': config.clientVersion,
-  };
-
-  // Add client name ID header like YouTube.js does
-  if (config.clientNameId) {
-    headers['X-Youtube-Client-Name'] = config.clientNameId;
-  }
-
-  // Add web-specific headers
-  if (clientType === 'WEB') {
-    headers['Content-Type'] = 'application/json';
-    headers['Origin'] = 'https://www.youtube.com';
-    headers['Referer'] = 'https://www.youtube.com/';
-    headers['DNT'] = '1';
-    headers['Sec-GPC'] = '1';
-    headers['Sec-Fetch-Dest'] = 'empty';
-    headers['Sec-Fetch-Mode'] = 'cors';
-    headers['Sec-Fetch-Site'] = 'same-origin';
-  } else {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  // Prepare request body with additional params for better compatibility
-  const requestBody = {
-    context,
-    videoId: videoID,
-    playbackContext: {
-      contentPlaybackContext: {
-        vis: 0,
-        splay: false,
-        lactMilliseconds: '-1',
-      },
+  const context = {
+    client: {
+      hl: 'en',
+      gl: 'US',
+      clientName: 'WEB',
+      clientVersion: '2.20250222.10.00',
     },
-    racyCheckOk: true,
-    contentCheckOk: true,
+    user: {
+      enableSafetyMode: false,
+    },
+    request: {
+      useSsl: true,
+    },
   };
 
-  // Add client-specific parameters
-  if (clientType === 'ANDROID') {
-    // Android clients may need additional params
-    (requestBody as any).params = 'CgIQBg%3D%3D'; // Base64 encoded params that Android uses
-  } else if (clientType === 'TV') {
-    // TV clients may need different params to bypass bot detection
-    (requestBody as any).thirdParty = {
-      embedUrl: 'https://www.youtube.com/',
-    };
-  }
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: '*/*',
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  };
 
-  // Use the more reliable InnerTube endpoint with proper context
-  const playerResponse = await fetchWithTimeout(
+  const response = await fetchWithTimeout(
     `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
     {
       method: 'POST',
       headers,
-      body: JSON.stringify(requestBody),
-      timeout: TIMEOUTS.PLAYER_REQUEST,
+      body: JSON.stringify({
+        context,
+        videoId: videoID,
+        playbackContext: {
+          contentPlaybackContext: {
+            vis: 0,
+            splay: false,
+            lactMilliseconds: '-1',
+          },
+        },
+        racyCheckOk: true,
+        contentCheckOk: true,
+      }),
+      timeout: 15000,
     }
   );
-
-  if (!playerResponse.ok) {
-    throw new Error(
-      `Player endpoint failed with ${clientType}: ${playerResponse.status} ${playerResponse.statusText}`
-    );
-  }
-
-  const playerData = await playerResponse.json();
-
-  // Check for errors in response
-  if (playerData.playabilityStatus?.status === 'ERROR') {
-    throw new Error(
-      `Video not available with ${clientType}: ${
-        playerData.playabilityStatus.reason || 'Unknown error'
-      }`
-    );
-  }
-
-  console.log(
-    `[DEBUG] ${clientType} response keys:`,
-    Object.keys(playerData || {})
-  );
-  console.log(`[DEBUG] ${clientType} has captions:`, !!playerData?.captions);
-  console.log(
-    `[DEBUG] ${clientType} has videoDetails:`,
-    !!playerData?.videoDetails
-  );
-  console.log(
-    `[DEBUG] ${clientType} has streamingData:`,
-    !!playerData?.streamingData
-  );
-
-  return { playerData, clientType };
-}
-
-async function fetchVideoData(videoID: string) {
-  return withRetry(async () => {
-    // Prioritize different clients based on environment and try TV client for serverless
-    const clientTypes: (keyof typeof CLIENT_CONFIGS)[] = isServerless
-      ? ['TV', 'ANDROID', 'WEB', 'IOS'] // TV client often bypasses bot detection
-      : ['ANDROID', 'WEB', 'IOS']; // Android often works better for non-serverless
-
-    let lastValidResponse: any = null;
-    let loginRequiredCount = 0;
-
-    for (const clientType of clientTypes) {
-      try {
-        const { playerData, clientType: usedClient } =
-          await fetchVideoDataWithClient(videoID, clientType);
-
-        // Store any response that has some data, even if not complete
-        if (playerData && Object.keys(playerData).length > 5) {
-          lastValidResponse = playerData;
-        }
-
-        // Check for LOGIN_REQUIRED specifically
-        if (playerData?.playabilityStatus?.status === 'LOGIN_REQUIRED') {
-          loginRequiredCount++;
-          console.warn(
-            `[DEBUG] ${usedClient} returned LOGIN_REQUIRED (${loginRequiredCount}/${clientTypes.length})`
-          );
-
-          // If this is a serverless environment and we get LOGIN_REQUIRED,
-          // try a different approach with the embed endpoint
-          if (isServerless && clientType === 'TV' && loginRequiredCount === 1) {
-            try {
-              console.log(`[DEBUG] Trying embed endpoint for ${videoID}`);
-              const embedData = await fetchEmbedVideoData(videoID);
-              if (embedData && isValidPlayerResponse(embedData)) {
-                console.log(
-                  `[DEBUG] Successfully got data from embed endpoint`
-                );
-                return embedData;
-              }
-            } catch (embedError) {
-              console.warn(
-                `[DEBUG] Embed endpoint failed:`,
-                embedError instanceof Error
-                  ? embedError.message
-                  : 'Unknown error'
-              );
-            }
-          }
-
-          continue; // Try next client
-        }
-
-        if (isValidPlayerResponse(playerData)) {
-          console.log(
-            `[DEBUG] Successfully got valid response from ${usedClient} client`
-          );
-          return playerData;
-        } else {
-          console.warn(
-            `[DEBUG] ${usedClient} client returned insufficient data, trying next client...`
-          );
-
-          // Debug: log the playability status if available
-          if (playerData?.playabilityStatus) {
-            console.log(
-              `[DEBUG] ${usedClient} playability status:`,
-              playerData.playabilityStatus.status
-            );
-            if (playerData.playabilityStatus.reason) {
-              console.log(
-                `[DEBUG] ${usedClient} reason:`,
-                playerData.playabilityStatus.reason
-              );
-            }
-          }
-        }
-      } catch (error) {
-        console.warn(
-          `[DEBUG] ${clientType} client failed:`,
-          error instanceof Error ? error.message : 'Unknown error'
-        );
-        // Continue to next client
-      }
-    }
-
-    // If we have any response, return it as a last resort
-    if (lastValidResponse) {
-      console.warn(`[DEBUG] Returning last valid response as fallback`);
-      return lastValidResponse;
-    }
-
-    // If all clients returned LOGIN_REQUIRED, try alternative strategies
-    if (loginRequiredCount === clientTypes.length) {
-      console.warn(
-        `[DEBUG] All clients returned LOGIN_REQUIRED, trying alternative approaches...`
-      );
-
-      try {
-        // Try the embed endpoint as a last resort
-        const embedData = await fetchEmbedVideoData(videoID);
-        if (embedData && isValidPlayerResponse(embedData)) {
-          console.log(
-            `[DEBUG] Successfully got data from embed endpoint as fallback`
-          );
-          return embedData;
-        }
-      } catch (embedError) {
-        console.warn(
-          `[DEBUG] Embed fallback failed:`,
-          embedError instanceof Error ? embedError.message : 'Unknown error'
-        );
-      }
-    }
-
-    // If all clients fail, throw error
-    throw new Error(
-      `All clients (${clientTypes.join(
-        ', '
-      )}) failed to retrieve video data. ${loginRequiredCount} returned LOGIN_REQUIRED.`
-    );
-  }, 'Video data fetch with multi-client fallback');
-}
-
-// Alternative embed endpoint for bot detection bypass
-async function fetchEmbedVideoData(videoID: string) {
-  console.log(`[DEBUG] Trying embed endpoint for video ${videoID}`);
-
-  // Use embed endpoint which is often less strict
-  const embedUrl = `https://www.youtube.com/embed/${videoID}`;
-
-  const headers: Record<string, string> = {
-    'User-Agent': CLIENT_CONFIGS.WEB.userAgent,
-    Referer: 'https://www.youtube.com/',
-    Accept:
-      'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Cache-Control': 'no-cache',
-  };
-
-  const response = await fetchWithTimeout(embedUrl, {
-    headers,
-    timeout: TIMEOUTS.PLAYER_REQUEST,
-  });
 
   if (!response.ok) {
-    throw new Error(`Embed endpoint failed: ${response.status}`);
-  }
-
-  const html = await response.text();
-
-  // Extract player configuration from embed page
-  const configMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
-  if (!configMatch) {
-    throw new Error('Could not extract player config from embed page');
-  }
-
-  try {
-    const playerData = JSON.parse(configMatch[1]);
-    console.log(
-      `[DEBUG] Embed extracted player data with keys:`,
-      Object.keys(playerData)
+    throw new Error(
+      `Player endpoint failed: ${response.status} ${response.statusText}`
     );
-    return playerData;
-  } catch (parseError) {
-    throw new Error('Failed to parse player config from embed page');
   }
+
+  const playerData = await response.json();
+  console.log(
+    `[DEBUG] Local strategy response keys:`,
+    Object.keys(playerData || {})
+  );
+  return playerData;
 }
 
 async function fetchCaptionTracks(videoID: string) {
   try {
     const playerData = await fetchVideoData(videoID);
 
-    // Debug: Log the structure we're getting
     console.log(`[DEBUG] Serverless: ${isServerless}, VideoID: ${videoID}`);
     console.log(`[DEBUG] Player response keys:`, Object.keys(playerData || {}));
     console.log(`[DEBUG] Has captions key:`, !!playerData?.captions);
-
-    if (playerData?.captions) {
-      console.log(`[DEBUG] Captions keys:`, Object.keys(playerData.captions));
-      console.log(
-        `[DEBUG] Has playerCaptionsTracklistRenderer:`,
-        !!playerData.captions.playerCaptionsTracklistRenderer
-      );
-
-      if (playerData.captions.playerCaptionsTracklistRenderer) {
-        const renderer = playerData.captions.playerCaptionsTracklistRenderer;
-        console.log(`[DEBUG] Renderer keys:`, Object.keys(renderer));
-        console.log(`[DEBUG] Has captionTracks:`, !!renderer.captionTracks);
-        console.log(
-          `[DEBUG] CaptionTracks length:`,
-          renderer.captionTracks?.length || 0
-        );
-
-        if (renderer.captionTracks?.length > 0) {
-          console.log(
-            `[DEBUG] First caption track:`,
-            JSON.stringify(renderer.captionTracks[0], null, 2)
-          );
-        }
-      }
-    }
 
     // Extract caption tracks from player response
     const captionTracks =
@@ -759,67 +336,8 @@ async function fetchCaptionTracks(videoID: string) {
     console.log(`[DEBUG] Extracted ${captionTracks.length} caption tracks`);
 
     if (!captionTracks.length) {
-      console.log(
-        `[DEBUG] No standard caption tracks found, checking adaptive formats...`
-      );
-
-      // Debug adaptive formats
-      const streamingData = playerData?.streamingData;
-      console.log(`[DEBUG] Has streamingData:`, !!streamingData);
-
-      if (streamingData) {
-        console.log(`[DEBUG] StreamingData keys:`, Object.keys(streamingData));
-        const adaptiveFormats = streamingData.adaptiveFormats || [];
-        console.log(`[DEBUG] AdaptiveFormats length:`, adaptiveFormats.length);
-
-        // Try alternative caption extraction from adaptive formats
-        const captionFormats = adaptiveFormats.filter(
-          (format: any) => format.mimeType && format.mimeType.includes('text/')
-        );
-
-        console.log(
-          `[DEBUG] Found ${captionFormats.length} text formats in adaptive streams`
-        );
-
-        if (captionFormats.length > 0) {
-          console.log(
-            `[DEBUG] First text format:`,
-            JSON.stringify(captionFormats[0], null, 2)
-          );
-          return captionFormats.map((format: any) => ({
-            baseUrl: format.url,
-            vssId: format.languageCode || 'unknown',
-          }));
-        }
-      }
-
-      // Final debug: Check if there are any other caption-related fields
-      console.log(
-        `[DEBUG] Searching for any caption-related fields in player response...`
-      );
-      const playerDataStr = JSON.stringify(playerData);
-      const captionMatches = playerDataStr.match(/caption/gi);
-      console.log(
-        `[DEBUG] Found ${
-          captionMatches?.length || 0
-        } occurrences of 'caption' in response`
-      );
-
-      // Check for alternative caption fields
-      if (playerData?.captions?.playerCaptionsRenderer) {
-        console.log(
-          `[DEBUG] Found playerCaptionsRenderer:`,
-          JSON.stringify(playerData.captions.playerCaptionsRenderer, null, 2)
-        );
-      }
-
-      // Check for subtitle fields
-      const subtitleMatches = playerDataStr.match(/subtitle/gi);
-      console.log(
-        `[DEBUG] Found ${
-          subtitleMatches?.length || 0
-        } occurrences of 'subtitle' in response`
-      );
+      console.log(`[DEBUG] No caption tracks found in player response`);
+      return [];
     }
 
     return captionTracks;
@@ -940,7 +458,7 @@ export const getVideoDetails = async ({
       const subtitlesResponse = await fetchWithTimeout(
         subtitle.baseUrl.replace('&fmt=srv3', ''), // force XML not JSON3
         {
-          timeout: TIMEOUTS.SUBTITLE_FETCH,
+          timeout: 10000,
         }
       );
 
@@ -981,7 +499,7 @@ export const getSubtitles = async ({
   lang = 'en',
 }: Options): Promise<Subtitle[]> => {
   try {
-    // Directly obtain caption tracks (faster & future-proof)
+    // Directly obtain caption tracks
     const captionTracks = await fetchCaptionTracks(videoID);
     if (!captionTracks.length) {
       console.warn(`No captions found for video: ${videoID}`);
@@ -1009,7 +527,7 @@ export const getSubtitles = async ({
       const subtitlesResponse = await fetchWithTimeout(
         subtitle.baseUrl.replace('&fmt=srv3', ''),
         {
-          timeout: TIMEOUTS.SUBTITLE_FETCH,
+          timeout: 10000,
         }
       );
 
@@ -1033,6 +551,3 @@ export const getSubtitles = async ({
     throw error;
   }
 };
-
-// Export the API key functions for advanced users
-export { getApiKey, getDynamicApiKey };
