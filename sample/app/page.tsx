@@ -16,15 +16,26 @@ const HomePage = () => {
   const fetchData = async () => {
     setIsFetching(true);
     try {
-      const response = await fetch(
-        `/api/subtitles?videoID=${videoID}&lang=${lang}`
-      );
-      if (!response.ok) {
-        throw new Error(`Error: ${response.status}`);
+      // Fetch subtitles and video details in parallel
+      const [subtitlesResponse, videoDetailsResponse] = await Promise.all([
+        fetch(`/api/subtitles?videoID=${videoID}&lang=${lang}`),
+        fetch(`/api/videoDetails?videoID=${videoID}&lang=${lang}`),
+      ]);
+
+      if (!subtitlesResponse.ok) {
+        throw new Error(`Subtitles API Error: ${subtitlesResponse.status}`);
       }
-      const result = await response.json();
-      setSubtitles(result.subtitles);
-      setVideoDetails(result.videoDetails);
+      if (!videoDetailsResponse.ok) {
+        throw new Error(
+          `Video Details API Error: ${videoDetailsResponse.status}`
+        );
+      }
+
+      const subtitlesResult = await subtitlesResponse.json();
+      const videoDetailsResult = await videoDetailsResponse.json();
+
+      setSubtitles(subtitlesResult.subtitles);
+      setVideoDetails(videoDetailsResult.videoDetails);
       setError(null);
     } catch (err) {
       if (err instanceof Error) {

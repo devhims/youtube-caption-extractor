@@ -1,4 +1,4 @@
-import { getSubtitles, getVideoDetails } from 'youtube-caption-extractor';
+import { getSubtitles } from 'youtube-caption-extractor';
 import { NextResponse } from 'next/server';
 import { type NextRequest } from 'next/server';
 
@@ -13,8 +13,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const subtitles = await getSubtitles({ videoID, lang });
-    const videoDetails = await getVideoDetails({ videoID, lang });
-    return NextResponse.json({ subtitles, videoDetails }, { status: 200 });
+    return NextResponse.json({ subtitles }, { status: 200 });
   } catch (error) {
     return NextResponse.json(
       { error: (error as Error).message },
