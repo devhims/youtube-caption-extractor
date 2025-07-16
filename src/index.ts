@@ -334,14 +334,33 @@ async function getTranscriptFromEngagementPanel(
 
   console.log(`[DEBUG] Found ${segments.length} transcript segments`);
 
+  // Debug the first few segments to understand the structure
+  if (segments.length > 0) {
+    console.log(`[DEBUG] First segment keys:`, Object.keys(segments[0]));
+    console.log(
+      `[DEBUG] First segment structure:`,
+      JSON.stringify(segments[0], null, 2)
+    );
+
+    if (segments.length > 1) {
+      console.log(`[DEBUG] Second segment keys:`, Object.keys(segments[1]));
+    }
+  }
+
   const subtitles: Subtitle[] = [];
 
   for (const segment of segments) {
     if (segment.transcriptSegmentRenderer) {
       const renderer = segment.transcriptSegmentRenderer;
+      console.log(`[DEBUG] Segment renderer keys:`, Object.keys(renderer));
+
       const startMs = parseInt(renderer.startMs || '0');
       const endMs = parseInt(renderer.endMs || '0');
       const text = renderer.snippet?.simpleText || '';
+
+      console.log(
+        `[DEBUG] Segment: startMs=${startMs}, endMs=${endMs}, text="${text}"`
+      );
 
       if (text.trim()) {
         subtitles.push({
@@ -350,6 +369,11 @@ async function getTranscriptFromEngagementPanel(
           text: he.decode(striptags(text)),
         });
       }
+    } else {
+      console.log(
+        `[DEBUG] Segment without transcriptSegmentRenderer:`,
+        Object.keys(segment)
+      );
     }
   }
 
