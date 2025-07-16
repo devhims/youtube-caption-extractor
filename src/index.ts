@@ -221,8 +221,25 @@ async function getTranscriptFromEngagementPanel(
 
   // Method 1: Direct continuationItemRenderer
   continuationItem = content?.continuationItemRenderer;
+  console.log(
+    `[DEBUG] ContinuationItem keys:`,
+    Object.keys(continuationItem || {})
+  );
+
+  if (continuationItem) {
+    // Log the full structure to understand what's available
+    console.log(
+      `[DEBUG] ContinuationItem structure:`,
+      JSON.stringify(continuationItem, null, 2)
+    );
+  }
+
   if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
     token = continuationItem.continuationEndpoint.continuationCommand.token;
+    console.log(
+      `[DEBUG] Found token via Method 1:`,
+      token.substring(0, 50) + '...'
+    );
   }
 
   // Method 2: Inside sectionListRenderer
