@@ -197,23 +197,7 @@ async function getTranscriptFromEngagementPanel(
   // Extract continuation token for transcript
   const content = transcriptPanel.engagementPanelSectionListRenderer?.content;
 
-  // Debug the transcript panel structure
-  console.log(
-    `[DEBUG] Transcript panel content keys:`,
-    Object.keys(content || {})
-  );
-  if (content?.sectionListRenderer) {
-    console.log(
-      `[DEBUG] SectionListRenderer contents length:`,
-      content.sectionListRenderer.contents?.length
-    );
-    if (content.sectionListRenderer.contents?.[0]) {
-      console.log(
-        `[DEBUG] First content keys:`,
-        Object.keys(content.sectionListRenderer.contents[0])
-      );
-    }
-  }
+  // Extract continuation token for transcript API
 
   // Try multiple ways to find the continuation token
   let continuationItem;
@@ -221,34 +205,16 @@ async function getTranscriptFromEngagementPanel(
 
   // Method 1: Direct continuationItemRenderer
   continuationItem = content?.continuationItemRenderer;
-  console.log(
-    `[DEBUG] ContinuationItem keys:`,
-    Object.keys(continuationItem || {})
-  );
-
-  if (continuationItem) {
-    // Log the full structure to understand what's available
-    console.log(
-      `[DEBUG] ContinuationItem structure:`,
-      JSON.stringify(continuationItem, null, 2)
-    );
-  }
 
   // Check for different token/params structures
   if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
     token = continuationItem.continuationEndpoint.continuationCommand.token;
-    console.log(
-      `[DEBUG] Found token via Method 1 (continuationCommand):`,
-      token.substring(0, 50) + '...'
-    );
+    console.log(`[DEBUG] Found token via continuationCommand`);
   } else if (
     continuationItem?.continuationEndpoint?.getTranscriptEndpoint?.params
   ) {
     token = continuationItem.continuationEndpoint.getTranscriptEndpoint.params;
-    console.log(
-      `[DEBUG] Found token via Method 1 (getTranscriptEndpoint):`,
-      token.substring(0, 50) + '...'
-    );
+    console.log(`[DEBUG] Found token via getTranscriptEndpoint`);
   }
 
   // Method 2: Inside sectionListRenderer
@@ -334,18 +300,7 @@ async function getTranscriptFromEngagementPanel(
 
   console.log(`[DEBUG] Found ${segments.length} transcript segments`);
 
-  // Debug the first few segments to understand the structure
-  if (segments.length > 0) {
-    console.log(`[DEBUG] First segment keys:`, Object.keys(segments[0]));
-    console.log(
-      `[DEBUG] First segment structure:`,
-      JSON.stringify(segments[0], null, 2)
-    );
-
-    if (segments.length > 1) {
-      console.log(`[DEBUG] Second segment keys:`, Object.keys(segments[1]));
-    }
-  }
+  // Successfully parsing transcript segments
 
   const subtitles: Subtitle[] = [];
   let debugCount = 0;
@@ -354,20 +309,7 @@ async function getTranscriptFromEngagementPanel(
     if (segment.transcriptSegmentRenderer) {
       const renderer = segment.transcriptSegmentRenderer;
 
-      // Only debug first 3 segments to avoid excessive logging
-      if (debugCount < 3) {
-        console.log(`[DEBUG] Segment renderer keys:`, Object.keys(renderer));
-
-        // Debug snippet structure
-        if (renderer.snippet) {
-          console.log(`[DEBUG] Snippet keys:`, Object.keys(renderer.snippet));
-          console.log(
-            `[DEBUG] Snippet structure:`,
-            JSON.stringify(renderer.snippet, null, 2)
-          );
-        }
-        debugCount++;
-      }
+      // Extract subtitle data
 
       const startMs = parseInt(renderer.startMs || '0');
       const endMs = parseInt(renderer.endMs || '0');
@@ -382,9 +324,16 @@ async function getTranscriptFromEngagementPanel(
         text = renderer.snippet.text;
       }
 
-      console.log(
-        `[DEBUG] Segment: startMs=${startMs}, endMs=${endMs}, text="${text}"`
-      );
+      // Log progress for first few segments
+      if (debugCount < 5) {
+        console.log(
+          `[DEBUG] Segment: startMs=${startMs}, endMs=${endMs}, text="${text.substring(
+            0,
+            50
+          )}${text.length > 50 ? '...' : ''}"`
+        );
+        debugCount++;
+      }
 
       if (text.trim()) {
         subtitles.push({
@@ -393,11 +342,6 @@ async function getTranscriptFromEngagementPanel(
           text: he.decode(striptags(text)),
         });
       }
-    } else {
-      console.log(
-        `[DEBUG] Segment without transcriptSegmentRenderer:`,
-        Object.keys(segment)
-      );
     }
   }
 
@@ -516,9 +460,37 @@ export const getVideoDetails = async ({
 
     // Extract basic video details
     const videoDetails = playerData?.videoDetails;
-    const title = videoDetails?.title || 'No title found';
-    const description =
-      videoDetails?.shortDescription || 'No description found';
+
+    // Extract title from multiple possible locations
+    let title = 'No title found';
+    if (videoDetails?.title) {
+      title = videoDetails.title;
+    } else if (
+      nextData?.contents?.twoColumnWatchNextResults?.results?.results
+        ?.contents?.[0]?.videoPrimaryInfoRenderer?.title?.runs?.[0]?.text
+    ) {
+      title =
+        nextData.contents.twoColumnWatchNextResults.results.results.contents[0]
+          .videoPrimaryInfoRenderer.title.runs[0].text;
+    } else if (nextData?.metadata?.videoMetadataRenderer?.title?.simpleText) {
+      title = nextData.metadata.videoMetadataRenderer.title.simpleText;
+    } else if (nextData?.videoDetails?.title) {
+      title = nextData.videoDetails.title;
+    }
+
+    // Extract description
+    let description = 'No description found';
+    if (videoDetails?.shortDescription) {
+      description = videoDetails.shortDescription;
+    } else if (
+      nextData?.contents?.twoColumnWatchNextResults?.results?.results
+        ?.contents?.[1]?.videoSecondaryInfoRenderer?.description?.runs
+    ) {
+      description =
+        nextData.contents.twoColumnWatchNextResults.results.results.contents[1].videoSecondaryInfoRenderer.description.runs
+          .map((run: any) => run.text)
+          .join('');
+    }
 
     console.log(`[DEBUG] Video title: ${title}`);
 
