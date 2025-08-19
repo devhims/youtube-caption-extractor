@@ -10,9 +10,4 @@ dist
 /sample/build/
 /sample/node_modules/
 
-IMPROVEMENTS.md
-API_KEY_EXPLANATION.md
-PRODUCTION_DEPLOYMENT_GUIDE.md
-VERCEL_DEBUGGING_GUIDE.md
-VERCEL_PRODUCTION_FIX.md
-request-flow.md
+/docs

@@ -2,7 +2,13 @@
 
 A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
 
-## What's new in latest version (v1.8.1)
+## What's new in latest version (v1.9.0)
+
+- **🎯 TypeScript Export Fix**: The `Subtitle` interface is now properly exported, allowing TypeScript users to import and use it for type annotations
+- **🔇 Clean Debug Logging**: Replaced console.log pollution with professional debug logging using the standard `debug` library
+- **📦 Silent by Default**: Library now produces zero log output in production, making it ideal for MCP servers
+
+## What's new in v1.8.1
 
 - **Enhanced Serverless Support**: Robust serverless deployment compatibility with automatic environment detection
 - **Improved Data Extraction**: Multi-location search for video titles and descriptions with comprehensive fallback strategies
@@ -28,7 +34,11 @@ npm install youtube-caption-extractor
 In a server-side environment or Node.js
 
 ```js
-import { getSubtitles, getVideoDetails } from 'youtube-caption-extractor';
+import {
+  getSubtitles,
+  getVideoDetails,
+  Subtitle,
+} from 'youtube-caption-extractor';
 
 // Fetching Subtitles
 const fetchSubtitles = async (videoID, lang = 'en') => {
@@ -57,6 +67,57 @@ fetchSubtitles(videoID, lang);
 fetchVideoDetails(videoID, lang);
 ```
 
+### TypeScript Usage
+
+```typescript
+import {
+  getSubtitles,
+  getVideoDetails,
+  Subtitle,
+  VideoDetails,
+} from 'youtube-caption-extractor';
+
+const fetchSubtitles = async (
+  videoID: string,
+  lang = 'en'
+): Promise<Subtitle[]> => {
+  try {
+    const subtitles: Subtitle[] = await getSubtitles({ videoID, lang });
+    console.log(subtitles);
+    return subtitles;
+  } catch (error) {
+    console.error('Error fetching subtitles:', error);
+    return [];
+  }
+};
+
+const fetchVideoDetails = async (
+  videoID: string,
+  lang = 'en'
+): Promise<VideoDetails> => {
+  try {
+    const details: VideoDetails = await getVideoDetails({ videoID, lang });
+    console.log(details);
+    return details;
+  } catch (error) {
+    console.error('Error fetching video details:', error);
+    throw error;
+  }
+};
+```
+
+### Debug Logging
+
+The library uses the standard `debug` library for logging. By default, it's silent in production.
+
+```bash
+# Enable debug logging
+DEBUG=youtube-caption-extractor node your-script.js
+
+# Or using npm scripts
+npm run test:debug
+```
+
 ## API
 
 ### getSubtitles({ videoID, lang })
@@ -80,6 +141,24 @@ Returns a promise that resolves to a VideoDetails object with the following prop
 - `title` (string) - The title of the video
 - `description` (string) - The description of the video
 - `subtitles (Subtitle[])` - An array of subtitle objects
+
+### Exported Types
+
+The following TypeScript interfaces are exported for your use:
+
+```typescript
+interface Subtitle {
+  start: string; // Start time in seconds
+  dur: string; // Duration in seconds
+  text: string; // Caption text content
+}
+
+interface VideoDetails {
+  title: string; // Video title
+  description: string; // Video description
+  subtitles: Subtitle[]; // Array of subtitle objects
+}
+```
 
 **Note:** The package automatically detects the deployment environment and uses the most appropriate method for data extraction. In serverless environments, it uses YouTube's engagement panel API for enhanced compatibility.
 

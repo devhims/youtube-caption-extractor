@@ -1,7 +1,10 @@
 import he from 'he';
 import striptags from 'striptags';
+import { debug as createDebug } from 'debug';
 
-interface Subtitle {
+const debug = createDebug('youtube-caption-extractor');
+
+export interface Subtitle {
   start: string;
   dur: string;
   text: string;
@@ -99,7 +102,7 @@ async function fetchInnerTube(endpoint: string, data: any): Promise<Response> {
 
   const url = `${INNERTUBE_CONFIG.API_BASE}${endpoint}?key=${INNERTUBE_CONFIG.API_KEY}`;
 
-  console.log(`[DEBUG] Calling InnerTube endpoint: ${endpoint}`);
+  debug(`Calling InnerTube endpoint: ${endpoint}`);
 
   return await fetch(url, {
     method: 'POST',
@@ -137,7 +140,7 @@ async function getVideoInfo(videoID: string) {
   const playerData = await response.json();
 
   if (playerData.playabilityStatus?.status === 'LOGIN_REQUIRED') {
-    console.log(`[DEBUG] LOGIN_REQUIRED status, trying next endpoint`);
+    debug(` LOGIN_REQUIRED status, trying next endpoint`);
 
     // Try the next endpoint for additional data including engagement panels
     const nextPayload = {
@@ -154,15 +157,12 @@ async function getVideoInfo(videoID: string) {
     }
 
     const nextData = await nextResponse.json();
-    console.log(`[DEBUG] Next API response keys:`, Object.keys(nextData));
+    debug(` Next API response keys:`, Object.keys(nextData));
 
     return { playerData, nextData };
   }
 
-  console.log(
-    `[DEBUG] Player API success, status:`,
-    playerData.playabilityStatus?.status
-  );
+  debug(`Player API success, status:`, playerData.playabilityStatus?.status);
   return { playerData, nextData: null };
 }
 
@@ -172,13 +172,11 @@ async function getTranscriptFromEngagementPanel(
   nextData: any
 ): Promise<Subtitle[]> {
   if (!nextData?.engagementPanels) {
-    console.log(`[DEBUG] No engagement panels found`);
+    debug(` No engagement panels found`);
     return [];
   }
 
-  console.log(
-    `[DEBUG] Found ${nextData.engagementPanels.length} engagement panels`
-  );
+  debug(` Found ${nextData.engagementPanels.length} engagement panels`);
 
   // Find the transcript panel
   const transcriptPanel = nextData.engagementPanels.find(
@@ -188,11 +186,11 @@ async function getTranscriptFromEngagementPanel(
   );
 
   if (!transcriptPanel) {
-    console.log(`[DEBUG] No transcript engagement panel found`);
+    debug(` No transcript engagement panel found`);
     return [];
   }
 
-  console.log(`[DEBUG] Found transcript engagement panel`);
+  debug(` Found transcript engagement panel`);
 
   // Extract continuation token for transcript
   const content = transcriptPanel.engagementPanelSectionListRenderer?.content;
@@ -209,12 +207,12 @@ async function getTranscriptFromEngagementPanel(
   // Check for different token/params structures
   if (continuationItem?.continuationEndpoint?.continuationCommand?.token) {
     token = continuationItem.continuationEndpoint.continuationCommand.token;
-    console.log(`[DEBUG] Found token via continuationCommand`);
+    debug(` Found token via continuationCommand`);
   } else if (
     continuationItem?.continuationEndpoint?.getTranscriptEndpoint?.params
   ) {
     token = continuationItem.continuationEndpoint.getTranscriptEndpoint.params;
-    console.log(`[DEBUG] Found token via getTranscriptEndpoint`);
+    debug(` Found token via getTranscriptEndpoint`);
   }
 
   // Method 2: Inside sectionListRenderer
@@ -258,10 +256,10 @@ async function getTranscriptFromEngagementPanel(
   }
 
   if (!token) {
-    console.log(`[DEBUG] No continuation token found in transcript panel`);
+    debug(` No continuation token found in transcript panel`);
     return [];
   }
-  console.log(`[DEBUG] Found continuation token, calling get_transcript`);
+  debug(` Found continuation token, calling get_transcript`);
 
   // Call the get_transcript endpoint
   const sessionData = generateSessionData();
@@ -282,10 +280,7 @@ async function getTranscriptFromEngagementPanel(
   }
 
   const transcriptData = await transcriptResponse.json();
-  console.log(
-    `[DEBUG] Transcript API response keys:`,
-    Object.keys(transcriptData)
-  );
+  debug(` Transcript API response keys:`, Object.keys(transcriptData));
 
   // Parse transcript segments
   const segments =
@@ -294,11 +289,11 @@ async function getTranscriptFromEngagementPanel(
       ?.transcriptSegmentListRenderer?.initialSegments;
 
   if (!segments || !Array.isArray(segments)) {
-    console.log(`[DEBUG] No transcript segments found`);
+    debug(` No transcript segments found`);
     return [];
   }
 
-  console.log(`[DEBUG] Found ${segments.length} transcript segments`);
+  debug(` Found ${segments.length} transcript segments`);
 
   // Successfully parsing transcript segments
 
@@ -326,8 +321,8 @@ async function getTranscriptFromEngagementPanel(
 
       // Log progress for first few segments
       if (debugCount < 5) {
-        console.log(
-          `[DEBUG] Segment: startMs=${startMs}, endMs=${endMs}, text="${text.substring(
+        debug(
+          ` Segment: startMs=${startMs}, endMs=${endMs}, text="${text.substring(
             0,
             50
           )}${text.length > 50 ? '...' : ''}"`
@@ -358,11 +353,11 @@ async function getSubtitlesFromCaptions(
     playerData?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
 
   if (!captionTracks || !Array.isArray(captionTracks)) {
-    console.log(`[DEBUG] No caption tracks found in player data`);
+    debug(` No caption tracks found in player data`);
     return [];
   }
 
-  console.log(`[DEBUG] Found ${captionTracks.length} caption tracks`);
+  debug(` Found ${captionTracks.length} caption tracks`);
 
   // Find the appropriate subtitle language track
   const subtitle =
@@ -372,11 +367,11 @@ async function getSubtitlesFromCaptions(
     captionTracks[0]; // fallback to first available
 
   if (!subtitle?.baseUrl) {
-    console.log(`[DEBUG] No suitable caption track found`);
+    debug(` No suitable caption track found`);
     return [];
   }
 
-  console.log(`[DEBUG] Using caption track: ${subtitle.vssId}`);
+  debug(` Using caption track: ${subtitle.vssId}`);
 
   // Fetch the caption content
   const captionUrl = subtitle.baseUrl.replace('&fmt=srv3', ''); // Force XML format
@@ -399,7 +394,7 @@ async function getSubtitlesFromCaptions(
     throw new Error('Caption content is empty or invalid');
   }
 
-  console.log(`[DEBUG] Caption XML length: ${xmlText.length} characters`);
+  debug(` Caption XML length: ${xmlText.length} characters`);
 
   // Parse XML captions
   const startRegex = /start="([\d.]+)"/;
@@ -451,9 +446,7 @@ export const getVideoDetails = async ({
   lang = 'en',
 }: Options): Promise<VideoDetails> => {
   try {
-    console.log(
-      `[DEBUG] Getting video details for ${videoID}, serverless: ${isServerless}`
-    );
+    debug(` Getting video details for ${videoID}, serverless: ${isServerless}`);
 
     // Get video info using proper InnerTube API
     const { playerData, nextData } = await getVideoInfo(videoID);
@@ -569,31 +562,26 @@ export const getVideoDetails = async ({
       }
     }
 
-    console.log(`[DEBUG] Video title: ${title}`);
-    console.log(
-      `[DEBUG] Video description: ${description.substring(0, 100)}${
+    debug(` Video title: ${title}`);
+    debug(
+      ` Video description: ${description.substring(0, 100)}${
         description.length > 100 ? '...' : ''
       }`
     );
 
     // Debug: Show available data structures for description
     if (description === 'No description found') {
-      console.log(
-        `[DEBUG] Description not found, checking available structures...`
-      );
+      debug(` Description not found, checking available structures...`);
       if (
         nextData?.contents?.twoColumnWatchNextResults?.results?.results
           ?.contents
       ) {
         nextData.contents.twoColumnWatchNextResults.results.results.contents.forEach(
           (content: any, index: number) => {
-            console.log(
-              `[DEBUG] Content ${index} keys:`,
-              Object.keys(content || {})
-            );
+            debug(` Content ${index} keys:`, Object.keys(content || {}));
             if (content?.videoSecondaryInfoRenderer) {
-              console.log(
-                `[DEBUG] videoSecondaryInfoRenderer keys:`,
+              debug(
+                `videoSecondaryInfoRenderer keys:`,
                 Object.keys(content.videoSecondaryInfoRenderer || {})
               );
             }
@@ -609,13 +597,13 @@ export const getVideoDetails = async ({
       try {
         subtitles = await getTranscriptFromEngagementPanel(videoID, nextData);
         if (subtitles.length > 0) {
-          console.log(
-            `[DEBUG] Successfully got ${subtitles.length} subtitles from transcript API`
+          debug(
+            ` Successfully got ${subtitles.length} subtitles from transcript API`
           );
         }
       } catch (error) {
-        console.warn(
-          `[DEBUG] Transcript API failed:`,
+        debug(
+          ` Transcript API failed:`,
           error instanceof Error ? error.message : 'Unknown error'
         );
       }
@@ -626,22 +614,20 @@ export const getVideoDetails = async ({
       try {
         subtitles = await getSubtitlesFromCaptions(videoID, playerData, lang);
         if (subtitles.length > 0) {
-          console.log(
-            `[DEBUG] Successfully got ${subtitles.length} subtitles from captions`
+          debug(
+            ` Successfully got ${subtitles.length} subtitles from captions`
           );
         }
       } catch (error) {
-        console.warn(
-          `[DEBUG] Caption fallback failed:`,
+        debug(
+          ` Caption fallback failed:`,
           error instanceof Error ? error.message : 'Unknown error'
         );
       }
     }
 
     if (subtitles.length === 0) {
-      console.warn(
-        `[DEBUG] No subtitles found for video: ${videoID} (language: ${lang})`
-      );
+      debug(` No subtitles found for video: ${videoID} (language: ${lang})`);
     }
 
     return {
@@ -650,7 +636,7 @@ export const getVideoDetails = async ({
       subtitles,
     };
   } catch (error) {
-    console.error(`[DEBUG] Error in getVideoDetails:`, error);
+    debug(`Error in getVideoDetails:`, error);
     throw error;
   }
 };
@@ -660,9 +646,7 @@ export const getSubtitles = async ({
   lang = 'en',
 }: Options): Promise<Subtitle[]> => {
   try {
-    console.log(
-      `[DEBUG] Getting subtitles for ${videoID}, serverless: ${isServerless}`
-    );
+    debug(` Getting subtitles for ${videoID}, serverless: ${isServerless}`);
 
     const { playerData, nextData } = await getVideoInfo(videoID);
 
@@ -677,8 +661,8 @@ export const getSubtitles = async ({
           return subtitles;
         }
       } catch (error) {
-        console.warn(
-          `[DEBUG] Transcript API failed:`,
+        debug(
+          ` Transcript API failed:`,
           error instanceof Error ? error.message : 'Unknown error'
         );
       }
@@ -687,7 +671,7 @@ export const getSubtitles = async ({
     // Fallback to captions
     return await getSubtitlesFromCaptions(videoID, playerData, lang);
   } catch (error) {
-    console.error('Error getting subtitles:', error);
+    debug('Error getting subtitles:', error);
     throw error;
   }
 };
