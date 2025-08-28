@@ -1,11 +1,11 @@
 # YouTube Caption Extractor
 
-A simple and efficient package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
+A lightweight package to scrape and parse captions (subtitles) from YouTube videos, supporting both user-submitted and auto-generated captions with language options. In addition, it can also retrieve the title and description of the YouTube video.
 
 ## What's new in latest version (v1.9.0)
 
 - **🎯 TypeScript Export Fix**: The `Subtitle` interface is now properly exported, allowing TypeScript users to import and use it for type annotations
-- **🔇 Clean Debug Logging**: Replaced console.log pollution with professional debug logging using the standard `debug` library
+- **🔇 Universal Debug Logging**: Replaced console.log pollution with a lightweight, universal debug logger that works in all environments (Node.js, Cloudflare Workers, Edge Runtime)
 - **📦 Silent by Default**: Library now produces zero log output in production, making it ideal for MCP servers
 
 ## What's new in v1.8.1
@@ -108,7 +108,7 @@ const fetchVideoDetails = async (
 
 ### Debug Logging
 
-The library uses the standard `debug` library for logging. By default, it's silent in production.
+The library includes a lightweight, universal debug logger that works in all environments (Node.js, Cloudflare Workers, Edge Runtime, etc.). By default, it's silent in production.
 
 ```bash
 # Enable debug logging
@@ -116,7 +116,12 @@ DEBUG=youtube-caption-extractor node your-script.js
 
 # Or using npm scripts
 npm run test:debug
+
+# Works in edge environments too
+DEBUG=youtube-caption-extractor wrangler dev
 ```
+
+**Edge Runtime Compatibility**: Unlike many logging libraries, our universal logger has zero Node.js dependencies and works seamlessly in Cloudflare Workers, Vercel Edge Functions, and other edge computing environments.
 
 ## API
 
@@ -168,8 +173,9 @@ This package is optimized for both traditional server and serverless environment
 
 - **✅ Local Development**: Full access to YouTube APIs with traditional caption extraction
 - **✅ Traditional Servers**: Works seamlessly with standard Node.js deployments
-- **✅ Serverless Platforms**: Auto-detects and adapts for Vercel, AWS Lambda, Netlify, Cloudflare Workers
-- **✅ Edge Runtime**: Compatible with edge computing environments
+- **✅ Serverless Platforms**: Auto-detects and adapts for Vercel, AWS Lambda, Netlify
+- **✅ Edge Runtime**: Full compatibility with Cloudflare Workers, Vercel Edge Functions, and other edge computing environments
+- **✅ Zero Node.js Dependencies**: Universal logging system works across all JavaScript runtimes
 
 ## Handling CORS issues in client-side applications
 

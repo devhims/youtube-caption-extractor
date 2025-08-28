@@ -1,8 +1,36 @@
 import he from 'he';
 import striptags from 'striptags';
-import { debug as createDebug } from 'debug';
 
-const debug = createDebug('youtube-caption-extractor');
+// Universal logger that works in all environments (Node.js, Cloudflare Workers, etc.)
+const createLogger = (namespace: string) => {
+  const isDebugEnabled = () => {
+    try {
+      // Try to access environment variables in a safe way
+      const env =
+        typeof process !== 'undefined' && process.env ? process.env : {};
+      const debugEnv = env.DEBUG || '';
+      return debugEnv === '*' || debugEnv.includes(namespace);
+    } catch {
+      return false;
+    }
+  };
+
+  return (message: string, ...args: any[]) => {
+    if (isDebugEnabled()) {
+      const timestamp = new Date().toISOString();
+      const logMessage = `${timestamp} ${namespace} ${message}`;
+
+      // Use console.log safely - available in all environments
+      if (args.length > 0) {
+        console.log(logMessage, ...args);
+      } else {
+        console.log(logMessage);
+      }
+    }
+  };
+};
+
+const debug = createLogger('youtube-caption-extractor');
 
 export interface Subtitle {
   start: string;
