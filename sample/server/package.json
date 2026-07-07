@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node api.cjs",
+    "test": "node --test api.test.cjs worker-routing.test.mjs",
     "cf:dev": "wrangler dev",
     "cf:deploy": "wrangler deploy",
     "cf:dry-run": "wrangler deploy --dry-run"

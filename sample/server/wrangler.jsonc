@@ -5,8 +5,10 @@
   "compatibility_date": "2026-05-16",
   "vars": {
     "API_INSTANCE_COUNT": "2",
-    "CONTAINER_VERSION": "server-v1",
+    "CONTAINER_VERSION": "server-v2",
     "CACHE_TTL_SECONDS": "21600",
+    "EXTRACTION_ATTEMPTS": "4",
+    "EXTRACTION_RETRY_BASE_DELAY_MS": "300",
     "ALLOWED_ORIGINS": "*"
   },
   "containers": [

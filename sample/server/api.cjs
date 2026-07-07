@@ -8,10 +8,28 @@ const SUCCESS_CACHE_CONTROL =
   process.env.SUCCESS_CACHE_CONTROL ||
   'public, max-age=3600, s-maxage=21600, stale-while-revalidate=86400';
 const OUTBOUND_PROXY_URL = process.env.OUTBOUND_PROXY_URL;
+const EXTRACTION_ATTEMPTS = boundedInteger(
+  process.env.EXTRACTION_ATTEMPTS,
+  4,
+  1,
+  8
+);
+const EXTRACTION_RETRY_BASE_DELAY_MS = boundedInteger(
+  process.env.EXTRACTION_RETRY_BASE_DELAY_MS,
+  300,
+  0,
+  5000
+);
 
 const app = new Hono();
 const cache = new Map();
 let extractorFetchPromise;
+
+function boundedInteger(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(parsed)));
+}
 
 function parseAllowedOrigins() {
   const raw = process.env.ALLOWED_ORIGINS || '*';
@@ -53,6 +71,73 @@ function normalizeApiError(error) {
     status: 500,
     body: { code: 'unknown_error', message },
   };
+}
+
+function isRetryableExtractionError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('private') ||
+    lower.includes('video unavailable') ||
+    lower.includes('this video is unavailable') ||
+    lower.includes('removed by')
+  ) {
+    return false;
+  }
+
+  return (
+    message.includes('LOGIN_REQUIRED') ||
+    lower.includes('not a bot') ||
+    lower.includes('no longer supported') ||
+    lower.includes('video not playable on any client') ||
+    lower.includes('innertube /player failed') ||
+    lower.includes('caption fetch failed: 429') ||
+    lower.includes('caption fetch failed: 500') ||
+    lower.includes('caption fetch failed: 502') ||
+    lower.includes('caption fetch failed: 503') ||
+    lower.includes('caption fetch failed: 504') ||
+    lower.includes('fetch failed') ||
+    lower.includes('econnreset') ||
+    lower.includes('etimedout') ||
+    lower.includes('und_err')
+  );
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withExtractionRetry(operation, options = {}) {
+  const attempts = boundedInteger(
+    options.attempts,
+    EXTRACTION_ATTEMPTS,
+    1,
+    8
+  );
+  const baseDelayMs = boundedInteger(
+    options.baseDelayMs,
+    EXTRACTION_RETRY_BASE_DELAY_MS,
+    0,
+    5000
+  );
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts || !isRetryableExtractionError(error)) {
+        throw error;
+      }
+      if (baseDelayMs > 0) {
+        await delay(baseDelayMs * attempt);
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 function getCached(key) {
@@ -135,7 +220,9 @@ app.get('/api/subtitles', async (c) => {
 
     const fetchImpl = await getExtractorFetch();
     const body = {
-      subtitles: await getSubtitles({ videoID, lang, fetch: fetchImpl }),
+      subtitles: await withExtractionRetry(() =>
+        getSubtitles({ videoID, lang, fetch: fetchImpl })
+      ),
     };
     setCached(cacheKey, body);
     return c.json(body, 200, cacheHeaders('MISS'));
@@ -161,7 +248,9 @@ app.get('/api/videoDetails', async (c) => {
 
     const fetchImpl = await getExtractorFetch();
     const body = {
-      videoDetails: await getVideoDetails({ videoID, lang, fetch: fetchImpl }),
+      videoDetails: await withExtractionRetry(() =>
+        getVideoDetails({ videoID, lang, fetch: fetchImpl })
+      ),
     };
     setCached(cacheKey, body);
     return c.json(body, 200, cacheHeaders('MISS'));
@@ -179,13 +268,23 @@ app.onError((error, c) => {
   return c.json(normalized.body, normalized.status);
 });
 
-serve(
-  {
-    fetch: app.fetch,
-    hostname: '0.0.0.0',
-    port: PORT,
-  },
-  () => {
-    console.log(`Caption API listening on :${PORT}`);
-  }
-);
+if (require.main === module) {
+  serve(
+    {
+      fetch: app.fetch,
+      hostname: '0.0.0.0',
+      port: PORT,
+    },
+    () => {
+      console.log(`Caption API listening on :${PORT}`);
+    }
+  );
+}
+
+module.exports = {
+  app,
+  boundedInteger,
+  isRetryableExtractionError,
+  normalizeApiError,
+  withExtractionRetry,
+};

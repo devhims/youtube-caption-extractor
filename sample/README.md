@@ -66,6 +66,8 @@ Optional runtime environment variables:
 - `CAPTION_API_TOKEN` — shared bearer token required by the Worker before it proxies to the container.
 - `OUTBOUND_PROXY_URL` — routes YouTube requests through an HTTP(S) proxy via `undici`.
 - `CACHE_TTL_SECONDS` — controls the warm in-memory response cache, default `21600`.
+- `EXTRACTION_ATTEMPTS` — retries transient YouTube egress failures inside the container, default `4`.
+- `EXTRACTION_RETRY_BASE_DELAY_MS` — linear retry backoff base delay, default `300`.
 - `ALLOWED_ORIGINS` — comma-separated browser origins for CORS, default `*`.
 - `CONTAINER_VERSION` — version prefix for container instance names; bump it to force fresh instances during rollouts.
 
