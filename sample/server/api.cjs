@@ -67,6 +67,13 @@ function normalizeApiError(error) {
     };
   }
 
+  if (isRetryableExtractionError(error)) {
+    return {
+      status: 503,
+      body: { code: 'caption_extraction_failed', message },
+    };
+  }
+
   return {
     status: 500,
     body: { code: 'unknown_error', message },
@@ -97,6 +104,8 @@ function isRetryableExtractionError(error) {
     lower.includes('caption fetch failed: 502') ||
     lower.includes('caption fetch failed: 503') ||
     lower.includes('caption fetch failed: 504') ||
+    lower.includes('caption response contained no subtitles') ||
+    lower.includes('caption response was not valid json') ||
     lower.includes('fetch failed') ||
     lower.includes('econnreset') ||
     lower.includes('etimedout') ||
@@ -188,6 +197,8 @@ function methodNotAllowed(c) {
 }
 
 app.use('*', async (c, next) => {
+  // Only responses with captions opt into caching below.
+  c.header('Cache-Control', 'no-store');
   c.header('Access-Control-Allow-Origin', allowOriginFor(c));
   c.header('Access-Control-Allow-Methods', 'GET, OPTIONS');
   c.header('Access-Control-Allow-Headers', 'Content-Type');
@@ -224,6 +235,7 @@ app.get('/api/subtitles', async (c) => {
         getSubtitles({ videoID, lang, fetch: fetchImpl })
       ),
     };
+    if (body.subtitles.length === 0) return c.json(body, 200);
     setCached(cacheKey, body);
     return c.json(body, 200, cacheHeaders('MISS'));
   } catch (error) {
@@ -248,10 +260,18 @@ app.get('/api/videoDetails', async (c) => {
 
     const fetchImpl = await getExtractorFetch();
     const body = {
-      videoDetails: await withExtractionRetry(() =>
-        getVideoDetails({ videoID, lang, fetch: fetchImpl })
-      ),
+      videoDetails: await withExtractionRetry(async () => {
+        const options = { videoID, lang, fetch: fetchImpl };
+        const details = await getVideoDetails(options);
+        // Published v1.10.1 swallows caption errors. Its subtitles API exposes
+        // them, allowing retries without waiting for a new library release.
+        if (details.subtitles.length === 0) {
+          details.subtitles = await getSubtitles(options);
+        }
+        return details;
+      }),
     };
+    if (body.videoDetails.subtitles.length === 0) return c.json(body, 200);
     setCached(cacheKey, body);
     return c.json(body, 200, cacheHeaders('MISS'));
   } catch (error) {

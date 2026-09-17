@@ -34,6 +34,15 @@ jobs:
       # are gated by YOUTUBE_LIVE=1 (see live-check.yml).
       - run: npm test
 
+      - name: Test production canary retries
+        run: node --test .github/scripts/check-production-api.test.mjs
+
+      - name: Test caption API retries and caching
+        if: matrix.node == 22
+        run: |
+          npm ci --prefix sample/server
+          npm test --prefix sample/server
+
       - name: Verify published tarball contents
         run: |
           npm pack --dry-run 2>&1 | tee pack-output.txt

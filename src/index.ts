@@ -294,7 +294,7 @@ async function fetchCaptionTrack(
 
   const text = await response.text();
   if (!text.trim()) {
-    return [];
+    throw new Error('Caption response contained no subtitles');
   }
 
   let data: Json3Transcript;
@@ -322,6 +322,9 @@ async function fetchCaptionTrack(
   }
 
   debug(`Parsed ${subtitles.length} caption events from json3`);
+  if (subtitles.length === 0) {
+    throw new Error('Caption response contained no subtitles');
+  }
   return subtitles;
 }
 
@@ -371,16 +374,7 @@ export const getVideoDetails = async ({
   const description =
     playerData.videoDetails?.shortDescription ?? 'No description found';
 
-  let subtitles: Subtitle[] = [];
-  try {
-    subtitles = await extractSubtitles(playerData, lang, fetchImpl);
-  } catch (err) {
-    debug(
-      `Subtitle extraction failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    );
-  }
+  const subtitles = await extractSubtitles(playerData, lang, fetchImpl);
 
   return { title, description, subtitles };
 };

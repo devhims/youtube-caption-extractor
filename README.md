@@ -120,7 +120,7 @@ const details = await getVideoDetails({ videoID: '7GeFt8suV8E', lang: 'en' });
 //   }
 ```
 
-If subtitles fail to extract but the video metadata is available, `subtitles` will be an empty array and the call still resolves (rather than throwing). This way you can always show title/description even when captions aren't available.
+If the video has no caption tracks, the call resolves with metadata and an empty `subtitles` array. If a caption track exists but fetching or parsing it fails, the call rejects so callers can retry. An empty response from an advertised caption track is also an error. This changes the previous behavior, which silently returned empty subtitles on extraction failures.
 
 ### Types
 

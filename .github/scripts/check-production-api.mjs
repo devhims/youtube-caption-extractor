@@ -67,31 +67,8 @@ async function fetchJson(url, videoId) {
   }
 }
 
-async function checkVideo(videoId) {
-  const params = new URLSearchParams({ videoID: videoId, lang });
-  const url = `${baseUrl}/api/videoDetails?${params.toString()}`;
-  let payload;
-  let lastError;
-
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try {
-      payload = await fetchJson(url, videoId);
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt === attempts) break;
-      console.warn(
-        `${videoId}: attempt ${attempt} failed, retrying - ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
-      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-    }
-  }
-
-  if (!payload) throw lastError;
-
-  const details = payload.videoDetails;
+function validatePayload(payload, videoId) {
+  const details = payload?.videoDetails;
 
   assert(
     details && typeof details === 'object',
@@ -107,10 +84,31 @@ async function checkVideo(videoId) {
   );
 
   validateSubtitle(details.subtitles[0], videoId);
+  return details;
+}
 
-  console.log(
-    `${videoId}: OK (${details.subtitles.length} captions) - ${details.title}`
-  );
+async function checkVideo(videoId) {
+  const params = new URLSearchParams({ videoID: videoId, lang });
+  const url = `${baseUrl}/api/videoDetails?${params.toString()}`;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const payload = await fetchJson(url, videoId);
+      const details = validatePayload(payload, videoId);
+      console.log(
+        `${videoId}: OK (${details.subtitles.length} captions) - ${details.title}`
+      );
+      return;
+    } catch (error) {
+      if (attempt === attempts) throw error;
+      console.warn(
+        `${videoId}: attempt ${attempt} failed, retrying - ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+    }
+  }
 }
 
 for (const videoId of videoIds) {
