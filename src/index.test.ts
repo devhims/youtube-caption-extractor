@@ -14,6 +14,49 @@ describe('public API surface', () => {
   });
 });
 
+describe('caption extraction failures', () => {
+  const player = {
+    playabilityStatus: { status: 'OK' },
+    videoDetails: { title: 'Test video', shortDescription: 'Description' },
+    captions: {
+      playerCaptionsTracklistRenderer: {
+        captionTracks: [{ baseUrl: 'https://example.test/timedtext?v=test', languageCode: 'en' }],
+      },
+    },
+  };
+
+  test.each([
+    ['HTTP failure', () => new Response('', { status: 503 }), 'Caption fetch failed: 503'],
+    ['invalid JSON', () => new Response('<html>blocked</html>'), 'Caption response was not valid JSON'],
+    ['empty body', () => new Response(''), 'Caption response contained no subtitles'],
+    ['empty events', () => Response.json({ events: [] }), 'Caption response contained no subtitles'],
+  ])('getVideoDetails exposes %s', async (_name, captionResponse, message) => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json(player))
+      .mockImplementationOnce(captionResponse);
+    await expect(getVideoDetails({ videoID: 'test', fetch: fetchImpl }))
+      .rejects.toThrow(message);
+  });
+
+  test('preserves network errors for callers to retry', async () => {
+    const error = new TypeError('fetch failed');
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(Response.json(player))
+      .mockRejectedValueOnce(error);
+    await expect(getVideoDetails({ videoID: 'test', fetch: fetchImpl }))
+      .rejects.toBe(error);
+  });
+
+  test('still returns metadata when the video has no caption tracks', async () => {
+    const fetchImpl = vi.fn().mockImplementation(async () => Response.json({
+      playabilityStatus: player.playabilityStatus,
+      videoDetails: player.videoDetails,
+    }));
+    await expect(getVideoDetails({ videoID: 'test', fetch: fetchImpl }))
+      .resolves.toEqual({ title: 'Test video', description: 'Description', subtitles: [] });
+  });
+});
+
 // Live-network integration tests. YouTube blocks most datacenter IP ranges
 // (including GitHub Actions, AWS, etc.) with a "Sign in to confirm you're
 // not a bot" challenge that no client version bypasses. So these tests are

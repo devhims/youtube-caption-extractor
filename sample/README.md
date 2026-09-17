@@ -61,6 +61,10 @@ The container endpoint supports:
 - `GET /api/subtitles?videoID=<id>&lang=en`
 - `GET /api/videoDetails?videoID=<id>&lang=en`
 
+Only responses containing captions are cached. Empty results and extraction errors use `Cache-Control: no-store`. The API retries transient caption failures and returns HTTP 503 with `caption_extraction_failed` if those retries are exhausted. Videos with no caption tracks can still return HTTP 200 with an empty array.
+
+The server also checks empty video-details results through `getSubtitles`, so caption errors are exposed even with the currently pinned library version. When rolling out this fix, refresh container instances and invalidate existing empty responses in the Vercel cache, or allow those cached responses to expire.
+
 Optional runtime environment variables:
 
 - `CAPTION_API_TOKEN` — shared bearer token required by the Worker before it proxies to the container.
