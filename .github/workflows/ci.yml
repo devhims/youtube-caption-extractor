@@ -43,6 +43,18 @@ jobs:
           npm ci --prefix sample/server
           npm test --prefix sample/server
 
+      - name: Test Next.js API timeouts
+        if: matrix.node == 22
+        run: |
+          npm ci --prefix sample
+          npm test --prefix sample
+
+      - name: Verify caption API image
+        if: matrix.node == 22
+        run: |
+          docker build --tag caption-api-ci sample/server
+          docker run --rm caption-api-ci node -e "require('./api.cjs')"
+
       - name: Verify published tarball contents
         run: |
           npm pack --dry-run 2>&1 | tee pack-output.txt

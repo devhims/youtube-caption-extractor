@@ -1,6 +1,7 @@
 const { serve } = require('@hono/node-server');
 const { Hono } = require('hono');
 const { getSubtitles, getVideoDetails } = require('youtube-caption-extractor');
+const { getVideoAccessError } = require('./video-access.cjs');
 
 const PORT = Number(process.env.PORT || 8080);
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_SECONDS || 21600) * 1000;
@@ -48,6 +49,9 @@ function allowOriginFor(c) {
 }
 
 function normalizeApiError(error) {
+  const accessError = getVideoAccessError(error);
+  if (accessError) return accessError;
+
   const message = error instanceof Error ? error.message : String(error);
   const looksLikeBotChallenge =
     message.includes('LOGIN_REQUIRED') ||
@@ -81,6 +85,8 @@ function normalizeApiError(error) {
 }
 
 function isRetryableExtractionError(error) {
+  if (getVideoAccessError(error)) return false;
+
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
 

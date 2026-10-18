@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test": "vitest run",
     "dev": "next dev",
     "api:dev": "npm --prefix server run dev",
     "build": "next build",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^19.2.3",
     "postcss": "^8",
     "tailwindcss": "^4.3.0",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^1.6.1"
   }
 }

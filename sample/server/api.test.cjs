@@ -138,3 +138,68 @@ test('isRetryableExtractionError recognises transient statuses', () => {
     false
   );
 });
+
+const membersOnlyReason = "This video is available to this channel's members on level: SCG SUPERFAN (or any higher level). Join this channel to get access to members-only content and other exclusive perks.";
+
+for (const path of ['videoDetails', 'subtitles']) {
+  test(`${path} returns an uncached access restriction after one extraction attempt`, async (t) => {
+    let playerCalls = 0;
+    t.mock.method(globalThis, 'fetch', async (url) => {
+      assert.match(String(url), /\/player\?/);
+      playerCalls += 1;
+      return Response.json({
+        playabilityStatus: { status: 'UNPLAYABLE', reason: membersOnlyReason },
+      });
+    });
+    const url = `/api/${path}?videoID=members-only-${path}`;
+    const response = await app.request(url);
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), {
+      code: 'video_access_restricted',
+      reason: 'members_only',
+      message: 'This video is members-only and requires the appropriate channel membership. This API cannot access its captions.',
+    });
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-cache'), null);
+    // The library checks its three clients once. The API must not repeat them.
+    assert.equal(playerCalls, 3);
+    const second = await app.request(url);
+    assert.equal(second.status, 403);
+    assert.equal(playerCalls, 6);
+  });
+}
+
+test('a membership error on one client still allows another playable client', async (t) => {
+  let playerCalls = 0;
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    if (!String(url).includes('/player?')) return validCaptions();
+    playerCalls += 1;
+    if (playerCalls === 1) {
+      return Response.json({ playabilityStatus: { status: 'UNPLAYABLE', reason: membersOnlyReason } });
+    }
+    return Response.json({
+      playabilityStatus: { status: 'OK' },
+      captions: { playerCaptionsTracklistRenderer: {
+        captionTracks: [{ baseUrl: 'https://example.test/timedtext?v=test', languageCode: 'en' }],
+      } },
+    });
+  });
+  const response = await app.request('/api/subtitles?videoID=playable-fallback');
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).subtitles, [subtitle]);
+  assert.equal(playerCalls, 2);
+});
+
+for (const reason of [
+  membersOnlyReason,
+  'This is a MEMBERS-ONLY video',
+  'This video is for members only',
+  'This video is available to this channel’s members on level: SUPERFAN',
+]) {
+  test(`membership restriction is permanent: ${reason}`, () => {
+    const error = new Error(`Video not playable on any client. Attempts:\nios: UNPLAYABLE - ${reason}\nmweb: LOGIN_REQUIRED - Sign in to confirm you are not a bot`);
+    assert.equal(normalizeApiError(error).status, 403);
+    assert.equal(normalizeApiError(error).body.code, 'video_access_restricted');
+    assert.equal(isRetryableExtractionError(error), false);
+  });
+}

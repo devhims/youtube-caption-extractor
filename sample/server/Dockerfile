@@ -9,6 +9,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY api.cjs ./api.cjs
+COPY video-access.cjs ./video-access.cjs
 
 EXPOSE 8080
 

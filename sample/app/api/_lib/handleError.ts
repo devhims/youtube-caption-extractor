@@ -1,13 +1,20 @@
 import { NextResponse } from 'next/server';
+import { getVideoAccessError } from '../../../server/video-access.cjs';
 
 /**
- * Maps library errors to HTTP responses. YouTube blocks datacenter IPs
- * (Vercel, AWS Lambda, Cloudflare Workers) with a bot challenge — the
- * library will throw a descriptive "Video not playable on any client"
- * error in that case. We surface that as a 503 with a friendly explanation
- * instead of a generic 500.
+ * Maps explicit membership restrictions to permanent 403 responses before
+ * handling bot challenges as transient 503 responses. Both can arrive inside
+ * the library's generic "Video not playable on any client" error.
  */
 export function handleApiError(error: unknown): NextResponse {
+  const accessError = getVideoAccessError(error);
+  if (accessError) {
+    return NextResponse.json(accessError.body, {
+      status: accessError.status,
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }
+
   const message = error instanceof Error ? error.message : String(error);
 
   const looksLikeBotChallenge =
