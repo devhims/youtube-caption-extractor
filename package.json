@@ -1,6 +1,6 @@
 {
   "name": "youtube-caption-extractor",
-  "version": "1.10.2",
+  "version": "1.10.3",
   "description": "Extract clean, timestamped YouTube captions, subtitles, transcripts, and video metadata for AI summaries, RAG, search, and slide-ready workflows.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

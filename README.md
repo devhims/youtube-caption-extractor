@@ -5,6 +5,16 @@
     Extract YouTube captions, subtitles, auto-generated transcripts, and video metadata
     with a tiny TypeScript library: ~10.8 kB packed, ~31.1 kB unpacked.
   </p>
+  <blockquote align="left">
+    <p>
+      <strong>Need more YouTube data?</strong> For new projects and AI agent workflows,
+      we recommend <a href="https://www.npmjs.com/package/all-things-youtube">all-things-youtube</a>,
+      our newer, more comprehensive YouTube package.
+      It supports search, transcripts and captions, comments, video details,
+      channels, and playlists, with built-in TypeScript types.
+      See the <a href="https://github.com/devhims/video2ctx/blob/main/packages/all-things-youtube/README.md">API documentation</a>.
+    </p>
+  </blockquote>
   <p>
     <a href="https://www.npmjs.com/package/youtube-caption-extractor"><img alt="npm version" src="https://img.shields.io/npm/v/youtube-caption-extractor?color=cb3837"></a>
     <a href="https://www.npmjs.com/package/youtube-caption-extractor"><img alt="npm downloads" src="https://img.shields.io/npm/dm/youtube-caption-extractor"></a>
@@ -405,6 +415,10 @@ async function transcript(opts: Options): Promise<Subtitle[]> {
 ```
 
 ## Changelog
+
+### v1.10.3
+
+- Added a recommendation for `all-things-youtube` for broader YouTube data and AI agent workflows. No API changes.
 
 ### v1.10.2
 
