@@ -55,6 +55,12 @@ CAPTION_API_TOKEN=<same-token-configured-on-the-worker>
 
 Do not put `CAPTION_API_TOKEN` in a `NEXT_PUBLIC_*` variable. The browser calls the Next.js API routes, and the Next.js server attaches the token when it calls the Worker.
 
+Both Next.js caption routes allow 60 seconds of execution on Vercel. Their proxy shares one 50-second deadline across all retry attempts and response-body reads. If the deadline expires, it aborts the pending request and returns HTTP 504 with `caption_api_timeout` and `Cache-Control: no-store`. Set `CAPTION_API_PROXY_TIMEOUT_MS` to shorten this deadline; values above 50000 are capped. `CAPTION_API_PROXY_ATTEMPTS` controls attempts, defaults to 3, and is capped at 5.
+
+The nightly canary waits up to 70 seconds per request, so it can receive the API's response before its own timeout. Deploy the Next.js app after changing the route duration; existing deployments retain their previous function limit. The Cloudflare Worker and container do not need a redeploy for this change.
+
+To run the API route regression tests, install dependencies at the repository root and in `sample/`, then run `npm test --prefix sample` from the repository root.
+
 The container endpoint supports:
 
 - `GET /health`

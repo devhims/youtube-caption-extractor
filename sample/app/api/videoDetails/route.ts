@@ -3,6 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { proxyCaptionApi } from '../_lib/captionApiProxy';
 import { handleApiError } from '../_lib/handleError';
 
+// Leave room for the proxy's shared 50-second deadline and an error response.
+export const maxDuration = 60;
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const videoID = searchParams.get('videoID');

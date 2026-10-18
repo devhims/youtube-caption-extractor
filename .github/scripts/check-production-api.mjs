@@ -4,7 +4,8 @@ const videoIds = (process.env.CAPTION_API_VIDEO_IDS || '')
   .map((id) => id.trim())
   .filter(Boolean);
 const lang = process.env.CAPTION_API_LANG || 'en';
-const timeoutMs = Number(process.env.CAPTION_API_TIMEOUT_MS || 30_000);
+// Outlast the API's 60-second function limit so failures include its response.
+const timeoutMs = Number(process.env.CAPTION_API_TIMEOUT_MS || 70_000);
 const attempts = Math.max(
   1,
   Math.floor(Number(process.env.CAPTION_API_ATTEMPTS || 3))

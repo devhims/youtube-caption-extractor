@@ -7,7 +7,7 @@ const valid = { videoDetails: {
 } };
 const empty = { videoDetails: { title: 'Test video', subtitles: [] } };
 
-function runCanary(responses) {
+function runCanary(responses, useDefaultTimeout = false) {
   const script = new URL('./check-production-api.mjs', import.meta.url).href;
   return spawnSync(process.execPath, ['--input-type=module', '-e', `
     const responses = ${JSON.stringify(responses)};
@@ -17,7 +17,11 @@ function runCanary(responses) {
       return Response.json(response.body, { status: response.status || 200 });
     };
     const originalTimeout = globalThis.setTimeout;
-    globalThis.setTimeout = (fn, ms) => originalTimeout(fn, ms === 30000 ? ms : 0);
+    globalThis.setTimeout = (fn, ms) => {
+      if (ms >= 30000) console.log('REQUEST_TIMEOUT=' + ms);
+      return originalTimeout(fn, ms >= 30000 ? ms : 0);
+    };
+    if (${useDefaultTimeout}) delete process.env.CAPTION_API_TIMEOUT_MS;
     process.on('exit', () => console.log('REQUESTS=' + calls));
     await import(${JSON.stringify(script)});
   `], {
@@ -47,4 +51,10 @@ test('retries invalid payloads as well as HTTP errors', () => {
   const result = runCanary([{ status: 503, body: {} }, { body: {} }, { body: valid }]);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /REQUESTS=3/);
+});
+
+test('default canary deadline outlasts the API function duration', () => {
+  const result = runCanary([{ body: valid }], true);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /REQUEST_TIMEOUT=70000/);
 });

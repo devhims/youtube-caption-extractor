@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "test": "vitest run",
     "dev": "next dev",
     "api:dev": "npm --prefix server run dev",
     "build": "next build",

@@ -25,6 +25,7 @@ jobs:
       CAPTION_API_VIDEO_IDS: 0Gb1z-2SjHY,D37Ijn2o5U0,g9JIUM0MHgQ,6BB6exR8Zd8,55pTFVoclvE
       CAPTION_API_LANG: en
       CAPTION_API_ATTEMPTS: 3
+      CAPTION_API_TIMEOUT_MS: 70000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
