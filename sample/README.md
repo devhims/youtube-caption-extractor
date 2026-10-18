@@ -59,7 +59,7 @@ Both Next.js caption routes allow 60 seconds of execution on Vercel. Their proxy
 
 The nightly canary waits up to 70 seconds per request, so it can receive the API's response before its own timeout. Deploy the Next.js app after changing the route duration; existing deployments retain their previous function limit. The Cloudflare Worker and container do not need a redeploy for this change.
 
-To run the API route regression tests, install dependencies at the repository root and in `sample/`, then run `npm test --prefix sample` from the repository root.
+To run the API route regression tests, run `npm ci --prefix sample` and `npm test --prefix sample` from the repository root.
 
 The container endpoint supports:
 
