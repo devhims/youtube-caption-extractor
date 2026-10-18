@@ -22,6 +22,24 @@ describe.each([
   ['videoDetails', detailsRoute],
   ['subtitles', subtitlesRoute],
 ] as const)('%s route', (path, route) => {
+  test('forwards a backend membership restriction without proxy retries', async () => {
+    const body = {
+      code: 'video_access_restricted',
+      reason: 'members_only',
+      message: 'This video is members-only and requires the appropriate channel membership. This API cannot access its captions.',
+    };
+    const fetchMock = vi.fn(async () => Response.json(body, {
+      status: 403, headers: { 'cache-control': 'no-store' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await route.GET(new NextRequest(`https://example.test/api/${path}?videoID=hswC9ZW7r0g&lang=en`));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(body);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   test('allows a slow backend retry to succeed beyond the former 10-second limit', async () => {
     expect((route as { maxDuration?: number }).maxDuration).toBe(60);
     const payload = path === 'videoDetails'
